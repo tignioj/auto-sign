@@ -1,0 +1,22 @@
+# macOS / Xcode
+.DS_Store
+DerivedData/
+xcuserdata/
+*.xcuserstate
+
+# Swift Package Manager and generated app bundles
+.build/
+.swiftpm/
+dist/
+
+# iOS applications and private signing material
+*.ipa
+*.mobileprovision
+*.provisionprofile
+*.p12
+*.cer
+*.key
+
+# Local logs and temporary files
+*.log
+*.tmp
