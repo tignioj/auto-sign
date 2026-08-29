@@ -17,6 +17,7 @@ struct ContentView: View {
                     deviceSection
                     ipaSection
                     signingSection
+                    provisioningGuide
                     actionBar
                 }
                 .padding(30)
@@ -212,6 +213,33 @@ struct ContentView: View {
         }
     }
 
+    private var provisioningGuide: some View {
+        card(title: "设备注册与描述文件", symbol: "questionmark.circle") {
+            VStack(alignment: .leading, spacing: 12) {
+                guideRow(
+                    symbol: "iphone.and.arrow.forward",
+                    title: "开发者模式 ≠ 设备注册",
+                    text: "开发者模式只允许设备运行开发 App，不会自动把 UDID 写入描述文件。"
+                )
+                guideRow(
+                    symbol: "person.crop.circle.badge.checkmark",
+                    title: "免费 Apple ID / Personal Team",
+                    text: "若描述文件不包含当前设备，AutoSign 会请 Xcode 自动注册并重建。请保持 Xcode 账号登录、Mac 联网，且设备已解锁并信任此 Mac。免费签名通常有效 7 天。"
+                )
+                guideRow(
+                    symbol: "person.2.badge.gearshape",
+                    title: "付费开发者账号",
+                    text: "如果自动注册失败，在 Apple Developer 的 Devices 中添加设备 UDID，然后重新生成并选择 Development 或 Ad Hoc 描述文件。"
+                )
+                HStack(spacing: 16) {
+                    Link("查看 Apple 设备注册说明", destination: URL(string: "https://developer.apple.com/help/account/devices/register-a-single-device")!)
+                    Link("查看描述文件更新说明", destination: URL(string: "https://developer.apple.com/help/account/provisioning-profiles/edit-download-or-delete-profiles")!)
+                }
+                .font(.caption)
+            }
+        }
+    }
+
     private var actionBar: some View {
         VStack(spacing: 12) {
             HStack(spacing: 12) {
@@ -265,6 +293,21 @@ struct ContentView: View {
     private func emptyRow(symbol: String, text: String) -> some View {
         HStack { Image(systemName: symbol); Text(text) }.foregroundStyle(.secondary)
             .frame(maxWidth: .infinity).padding(20).background(.white.opacity(0.03), in: RoundedRectangle(cornerRadius: 12))
+    }
+
+    private func guideRow(symbol: String, title: String, text: String) -> some View {
+        HStack(alignment: .top, spacing: 12) {
+            Image(systemName: symbol)
+                .foregroundStyle(.cyan)
+                .frame(width: 24)
+            VStack(alignment: .leading, spacing: 3) {
+                Text(title).font(.callout.weight(.semibold))
+                Text(text)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
     }
 
     private func fileDescription(_ url: URL) -> String {

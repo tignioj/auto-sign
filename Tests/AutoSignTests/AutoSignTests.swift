@@ -30,6 +30,34 @@ import Testing
     #expect(SigningService.explicitBundleIdentifier(from: "TEAM123.*") == nil)
 }
 
+@Test func refreshesProfileWhenTargetDeviceIsMissing() {
+    let validProfile = ProvisioningProfile(
+        name: "Test Profile",
+        uuid: "profile-uuid",
+        expirationDate: Date().addingTimeInterval(3_600),
+        applicationIdentifier: "TEAM123.com.example.app",
+        teamIdentifier: "TEAM123",
+        provisionedDevices: ["old-device"],
+        provisionsAllDevices: false,
+        entitlements: [:]
+    )
+
+    #expect(SigningService.profileNeedsRefresh(validProfile, for: "new-device", forceRefresh: false))
+    #expect(!SigningService.profileNeedsRefresh(validProfile, for: "old-device", forceRefresh: false))
+
+    let allDevicesProfile = ProvisioningProfile(
+        name: "Enterprise Profile",
+        uuid: "enterprise-profile-uuid",
+        expirationDate: Date().addingTimeInterval(3_600),
+        applicationIdentifier: "TEAM123.com.example.app",
+        teamIdentifier: "TEAM123",
+        provisionedDevices: [],
+        provisionsAllDevices: true,
+        entitlements: [:]
+    )
+    #expect(!SigningService.profileNeedsRefresh(allDevicesProfile, for: "new-device", forceRefresh: false))
+}
+
 @Test func integrationSignAndInstallWhenConfigured() async throws {
     let environment = ProcessInfo.processInfo.environment
     guard let ipaPath = environment["AUTOSIGN_INTEGRATION_IPA"],

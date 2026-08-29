@@ -10,6 +10,8 @@ AutoSign 是一个原生 macOS 图形工具，用自己的 Apple 开发者签名
 4. 在设备的 **设置 → 隐私与安全性 → 开发者模式** 中开启开发者模式并重启。
 5. 从 Apple Developer 下载匹配应用 Bundle ID 和目标设备 UDID 的 Development 或 Ad Hoc `.mobileprovision`。免费 Personal Team 也可以，但描述文件和应用通常只有 7 天有效期。
 
+> 开启“开发者模式”只表示设备允许运行开发 App，不会自动把设备 UDID 写入描述文件。如果当前描述文件缺少目标设备，AutoSign 会通过 Xcode 尝试注册设备并重新生成描述文件。
+
 ## 构建和运行
 
 要求 macOS 14 或更高版本，并安装完整的 Xcode。
@@ -28,6 +30,11 @@ open dist/AutoSign.app
 连接设备后，AutoSign 会自动选择设备、钥匙串证书和 Xcode 中可用的最新描述文件。拖入 `.ipa`，点击“一键签名并安装”即可。签名后的副本会保存在原 IPA 旁边，原文件不会被修改。如果 IPA 使用了无法注册的示例 Bundle ID，AutoSign 会采用描述文件中的明确 Bundle ID 完成重签名。
 
 Personal Team 免费签名通常只有 7 天有效期。到期后保持 Xcode 账号登录、Mac 联网并连接设备，再次点击“一键签名并安装”；AutoSign 会调用 Xcode 自动续期描述文件，随后重新签名和安装。若 Apple 要求重新登录或接受新的开发者协议，需要先在 Xcode 中完成该步骤。
+
+当描述文件不包含所选设备时：
+
+- 免费 Apple ID / Personal Team：保持 Xcode 账号登录、Mac 联网，并确保设备已解锁、信任此 Mac。AutoSign 会请 Xcode 自动注册设备。
+- 付费开发者账号：如果自动注册失败，可在 Apple Developer 的 **Certificates, Identifiers & Profiles → Devices** 中添加 UDID，再重新生成并下载 Development 或 Ad Hoc 描述文件。
 
 ## 同一 Wi-Fi 后台自动续签
 

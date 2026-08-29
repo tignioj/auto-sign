@@ -45,13 +45,24 @@ enum SigningService {
         statusChanged: @escaping @MainActor @Sendable (String) -> Void
     ) async throws -> URL {
         let profile = try await readProfile(at: profileURL)
-        guard forceRefresh || profile.isExpired else { return profileURL }
+        let deviceMissing = !profile.provisionsAllDevices && !profile.provisionedDevices.contains(device.udid)
+        guard profileNeedsRefresh(profile, for: device.udid, forceRefresh: forceRefresh) else {
+            return profileURL
+        }
         guard let bundleID = explicitBundleIdentifier(from: profile.applicationIdentifier),
               !profile.teamIdentifier.isEmpty else {
             throw AutoSignError.invalidProfile("无法从旧描述文件读取续期所需的 Team ID 或 Bundle ID。")
         }
 
-        await statusChanged(profile.isExpired ? "描述文件已过期，正在通过 Xcode 自动续期…" : "正在通过 Xcode 重新创建签名证书…")
+        let refreshMessage: String
+        if deviceMissing {
+            refreshMessage = "描述文件未包含 \(device.name)，正在通过 Xcode 注册设备并更新…"
+        } else if profile.isExpired {
+            refreshMessage = "描述文件已过期，正在通过 Xcode 自动续期…"
+        } else {
+            refreshMessage = "正在通过 Xcode 重新创建签名证书…"
+        }
+        await statusChanged(refreshMessage)
         let project = try provisioningHelperProjectURL()
         let appSupport = try FileManager.default.url(
             for: .applicationSupportDirectory, in: .userDomainMask, appropriateFor: nil, create: true
@@ -82,7 +93,23 @@ enum SigningService {
         try FileManager.default.copyItemReplacing(generated, to: destination)
         let renewed = try await readProfile(at: destination)
         guard !renewed.isExpired else { throw AutoSignError.invalidProfile("Xcode 返回的描述文件仍处于过期状态。") }
+        guard renewed.provisionsAllDevices || renewed.provisionedDevices.contains(device.udid) else {
+            throw AutoSignError.invalidProfile(
+                "Xcode 已更新描述文件，但仍未包含设备 UDID（\(device.udid)）。"
+                + "请确认 Xcode 账号已登录、设备已解锁并信任此 Mac；付费开发者账号也可在 Apple Developer 后台注册该 UDID 后重新生成描述文件。"
+            )
+        }
         return destination
+    }
+
+    static func profileNeedsRefresh(
+        _ profile: ProvisioningProfile,
+        for deviceUDID: String,
+        forceRefresh: Bool
+    ) -> Bool {
+        forceRefresh
+            || profile.isExpired
+            || (!profile.provisionsAllDevices && !profile.provisionedDevices.contains(deviceUDID))
     }
 
     static func bestInstalledProfileURL(for device: AppleDevice?) async -> URL? {
