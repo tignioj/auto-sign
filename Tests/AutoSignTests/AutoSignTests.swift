@@ -21,6 +21,18 @@ import Testing
     #expect(device.statusText == "需与这台 Mac 配对")
 }
 
+@Test func activeProbeRecognizesReachableWiFiDevice() throws {
+    let passiveList = #"{"result":{"devices":[{"identifier":"core-id","deviceProperties":{"name":"Wi-Fi iPhone","osVersionNumber":"26.6","developerModeStatus":"enabled"},"hardwareProperties":{"deviceType":"iPhone","marketingName":"iPhone","platform":"iOS","reality":"physical","udid":"device-udid"},"connectionProperties":{"pairingState":"paired","transportType":"localNetwork","tunnelState":"disconnected"}}]}}"#
+    let listedDevice = try #require(DeviceService.parseDevices(from: Data(passiveList.utf8)).first)
+    #expect(listedDevice.isPaired)
+    #expect(!listedDevice.isConnected)
+
+    let activeDetails = #"{"result":{"identifier":"core-id","deviceProperties":{"name":"Wi-Fi iPhone","osVersionNumber":"26.6","developerModeStatus":"enabled"},"hardwareProperties":{"deviceType":"iPhone","marketingName":"iPhone","platform":"iOS","reality":"physical","udid":"device-udid"},"connectionProperties":{"pairingState":"paired","transportType":"localNetwork","tunnelState":"connected"}}}"#
+    let probedDevice = try #require(try DeviceService.parseDeviceDetails(from: Data(activeDetails.utf8)))
+    #expect(probedDevice.isConnected)
+    #expect(probedDevice.isReadyForInstallation)
+}
+
 @Test func matchesProvisioningApplicationIdentifiers() {
     #expect(SigningService.profileSupports("TEAM123.*", bundleID: "com.example.app"))
     #expect(SigningService.profileSupports("TEAM123.com.example.*", bundleID: "com.example.app"))
