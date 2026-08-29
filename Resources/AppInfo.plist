@@ -4,6 +4,7 @@
 <dict>
     <key>CFBundleDisplayName</key><string>AutoSign</string>
     <key>CFBundleExecutable</key><string>AutoSign</string>
+    <key>CFBundleIconFile</key><string>AutoSign.icns</string>
     <key>CFBundleIdentifier</key><string>local.autosign.desktop</string>
     <key>CFBundleInfoDictionaryVersion</key><string>6.0</string>
     <key>CFBundleName</key><string>AutoSign</string>
