@@ -3,12 +3,22 @@ import Testing
 @testable import AutoSign
 
 @Test func parsesDeviceList() throws {
-    let json = #"{"result":{"devices":[{"identifier":"core-id","deviceProperties":{"name":"测试 iPad","osVersionNumber":"26.0","developerModeStatus":"enabled"},"hardwareProperties":{"deviceType":"iPad","marketingName":"iPad mini","platform":"iOS","productType":"iPad16,1","reality":"physical","udid":"device-udid"},"connectionProperties":{"tunnelState":"connected"}}]}}"#
+    let json = #"{"result":{"devices":[{"identifier":"core-id","deviceProperties":{"name":"测试 iPad","osVersionNumber":"26.0","developerModeStatus":"enabled"},"hardwareProperties":{"deviceType":"iPad","marketingName":"iPad mini","platform":"iOS","productType":"iPad16,1","reality":"physical","udid":"device-udid"},"connectionProperties":{"pairingState":"paired","tunnelState":"connected"}}]}}"#
     let devices = try DeviceService.parseDevices(from: Data(json.utf8))
     #expect(devices.count == 1)
     #expect(devices[0].kind == .iPad)
+    #expect(devices[0].isPaired)
     #expect(devices[0].developerModeEnabled)
+    #expect(devices[0].isReadyForInstallation)
     #expect(devices[0].udid == "device-udid")
+}
+
+@Test func parsesUnpairedDevice() throws {
+    let json = #"{"result":{"devices":[{"identifier":"core-id","deviceProperties":{"name":"测试 iPhone","osVersionNumber":"26.6"},"hardwareProperties":{"deviceType":"iPhone","platform":"iOS","reality":"physical","udid":"device-udid"},"connectionProperties":{"pairingState":"unpaired","transportType":"wired","tunnelState":"disconnected"}}]}}"#
+    let device = try #require(DeviceService.parseDevices(from: Data(json.utf8)).first)
+    #expect(!device.isPaired)
+    #expect(!device.isConnected)
+    #expect(device.statusText == "需与这台 Mac 配对")
 }
 
 @Test func matchesProvisioningApplicationIdentifiers() {

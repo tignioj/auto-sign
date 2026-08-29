@@ -84,11 +84,43 @@ struct ContentView: View {
                 }
 
                 if model.filteredDevices.isEmpty {
-                    emptyRow(symbol: model.deviceKind.symbol, text: "没有发现已配对的 \(model.deviceKind.title)，请连接 USB 并解锁设备")
+                    emptyRow(symbol: model.deviceKind.symbol, text: "没有发现 \(model.deviceKind.title)，请连接 USB 并解锁设备")
                 } else {
                     ScrollView(.horizontal, showsIndicators: false) {
                         HStack(spacing: 12) {
-                            ForEach(model.filteredDevices) { device in deviceCard(device) }
+                            ForEach(model.filteredDevices) { device in
+                                VStack(spacing: 8) {
+                                    deviceCard(device)
+                                    if !device.isPaired {
+                                        Button { model.pair(device) } label: {
+                                            HStack(spacing: 7) {
+                                                if model.pairingDeviceID == device.id {
+                                                    ProgressView().controlSize(.small)
+                                                } else {
+                                                    Image(systemName: "link")
+                                                }
+                                                Text(model.pairingDeviceID == device.id ? "正在配对…" : "发起配对")
+                                            }
+                                            .frame(maxWidth: .infinity)
+                                        }
+                                        .buttonStyle(.borderedProminent)
+                                        .tint(.indigo)
+                                        .disabled(model.pairingDeviceID != nil)
+                                    } else if !device.developerModeEnabled {
+                                        Label {
+                                            Text("在设备上打开：设置 → 隐私与安全性 → 向下滑到“安全性”区域 → 开发者模式")
+                                                .fixedSize(horizontal: false, vertical: true)
+                                        } icon: {
+                                            Image(systemName: "gearshape.fill")
+                                        }
+                                        .font(.caption)
+                                        .foregroundStyle(.orange)
+                                        .padding(10)
+                                        .frame(maxWidth: 250, alignment: .leading)
+                                        .background(Color.orange.opacity(0.1), in: RoundedRectangle(cornerRadius: 10))
+                                    }
+                                }
+                            }
                         }
                     }
                 }
@@ -106,8 +138,8 @@ struct ContentView: View {
                 VStack(alignment: .leading, spacing: 4) {
                     Text(device.name).font(.headline)
                     Text("\(device.marketingName) · \(device.osVersion)").font(.caption).foregroundStyle(.secondary)
-                    Label(device.statusText, systemImage: device.developerModeEnabled ? "checkmark.circle.fill" : "exclamationmark.triangle.fill")
-                        .font(.caption2).foregroundStyle(device.developerModeEnabled ? .green : .orange)
+                    Label(device.statusText, systemImage: device.isReadyForInstallation ? "checkmark.circle.fill" : "exclamationmark.triangle.fill")
+                        .font(.caption2).foregroundStyle(device.isReadyForInstallation ? .green : .orange)
                 }
             }
             .padding(14).frame(minWidth: 250, alignment: .leading)

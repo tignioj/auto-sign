@@ -28,6 +28,8 @@ enum DeviceService {
                 marketingName: item.hardwareProperties.marketingName ?? item.hardwareProperties.productType ?? type.rawValue,
                 kind: type,
                 osVersion: item.deviceProperties.osVersionNumber ?? "未知版本",
+                isPaired: item.connectionProperties.pairingState == "paired"
+                    || item.connectionProperties.tunnelState == "connected",
                 developerModeEnabled: item.deviceProperties.developerModeStatus == "enabled",
                 isConnected: item.connectionProperties.tunnelState == "connected"
             )
@@ -36,6 +38,14 @@ enum DeviceService {
             if lhs.isConnected != rhs.isConnected { return lhs.isConnected }
             return lhs.name.localizedStandardCompare(rhs.name) == .orderedAscending
         }
+    }
+
+    static func pair(_ device: AppleDevice) async throws {
+        _ = try await ProcessRunner.checked(
+            "/usr/bin/xcrun",
+            ["devicectl", "manage", "pair", "--device", device.id, "--timeout", "120"],
+            context: "无法与设备配对。请保持设备解锁并通过 USB 连接，然后在设备上确认信任。"
+        )
     }
 }
 
@@ -66,5 +76,8 @@ private struct DeviceItem: Decodable {
         let udid: String?
     }
 
-    struct ConnectionProperties: Decodable { let tunnelState: String? }
+    struct ConnectionProperties: Decodable {
+        let pairingState: String?
+        let tunnelState: String?
+    }
 }

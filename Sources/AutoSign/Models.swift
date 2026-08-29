@@ -16,13 +16,19 @@ struct AppleDevice: Identifiable, Hashable, Sendable {
     let marketingName: String
     let kind: DeviceKind
     let osVersion: String
+    let isPaired: Bool
     let developerModeEnabled: Bool
     let isConnected: Bool
 
     var statusText: String {
+        if !isPaired { return "需与这台 Mac 配对" }
         if !isConnected { return "设备未连接" }
         if !developerModeEnabled { return "需开启开发者模式" }
         return "已连接，可安装"
+    }
+
+    var isReadyForInstallation: Bool {
+        isPaired && isConnected && developerModeEnabled
     }
 }
 

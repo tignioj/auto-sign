@@ -13,6 +13,7 @@ final class AppModel: ObservableObject {
     @Published var stage: InstallStage = .idle
     @Published var detail = "连接设备，然后拖入一个 IPA 文件"
     @Published var isRefreshing = false
+    @Published var pairingDeviceID: String?
     @Published var isDropTargeted = false
     @Published var autoRefreshEnabled = BackgroundRefreshManager.isInstalled
     @Published var lastBackgroundStatus = BackgroundRefreshManager.lastStatus
@@ -21,7 +22,7 @@ final class AppModel: ObservableObject {
     var selectedDevice: AppleDevice? { devices.first { $0.id == selectedDeviceID } }
     var selectedIdentity: SigningIdentity? { identities.first { $0.id == selectedIdentityID } }
     var canInstall: Bool {
-        ipaURL != nil && profileURL != nil && selectedDevice != nil && !stage.isRunning
+        ipaURL != nil && profileURL != nil && selectedDevice?.isReadyForInstallation == true && !stage.isRunning
     }
 
     init(performInitialRefresh: Bool = true) {
@@ -55,6 +56,9 @@ final class AppModel: ObservableObject {
                 } else if let first = devices.first(where: \.isConnected) {
                     deviceKind = first.kind
                     selectedDeviceID = first.id
+                } else if let first = filteredDevices.first ?? devices.first {
+                    deviceKind = first.kind
+                    selectedDeviceID = first.id
                 }
             }
             if !identities.contains(where: { $0.id == selectedIdentityID }) { selectedIdentityID = identities.first?.id }
@@ -71,7 +75,32 @@ final class AppModel: ObservableObject {
 
     func changeKind(_ kind: DeviceKind) {
         deviceKind = kind
-        if selectedDevice?.kind != kind { selectedDeviceID = filteredDevices.first(where: \.isConnected)?.id }
+        if selectedDevice?.kind != kind {
+            selectedDeviceID = filteredDevices.first(where: \.isConnected)?.id ?? filteredDevices.first?.id
+        }
+    }
+
+    func pair(_ device: AppleDevice) {
+        guard pairingDeviceID == nil else { return }
+        pairingDeviceID = device.id
+        selectedDeviceID = device.id
+        stage = .idle
+        detail = "正在发起配对，请保持 \(device.name) 解锁并留意设备上的确认提示…"
+        Task {
+            defer { pairingDeviceID = nil }
+            do {
+                try await DeviceService.pair(device)
+                detail = "配对成功，正在刷新设备状态…"
+                await refresh()
+                if let refreshed = devices.first(where: { $0.udid == device.udid }),
+                   !refreshed.developerModeEnabled {
+                    detail = "配对成功；请在设备的“设置 → 隐私与安全性 → 开发者模式”中开启开发者模式"
+                }
+            } catch {
+                stage = .failed(error.localizedDescription)
+                detail = error.localizedDescription
+            }
+        }
     }
 
     func chooseIPA() {

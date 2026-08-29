@@ -6,8 +6,9 @@ AutoSign 是一个原生 macOS 图形工具，用自己的 Apple 开发者签名
 
 1. 安装 Xcode，在 **Xcode → Settings → Accounts** 登录 Apple ID。
 2. 用 USB 连接设备、解锁并选择“信任此电脑”。
-3. 在设备的 **设置 → 隐私与安全性 → 开发者模式** 中开启开发者模式并重启。
-4. 从 Apple Developer 下载匹配应用 Bundle ID 和目标设备 UDID 的 Development 或 Ad Hoc `.mobileprovision`。免费 Personal Team 也可以，但描述文件和应用通常只有 7 天有效期。
+3. 如果设备尚未完成开发者配对，在 AutoSign 中点击 **发起配对**，保持设备解锁并确认提示。
+4. 在设备的 **设置 → 隐私与安全性 → 开发者模式** 中开启开发者模式并重启。
+5. 从 Apple Developer 下载匹配应用 Bundle ID 和目标设备 UDID 的 Development 或 Ad Hoc `.mobileprovision`。免费 Personal Team 也可以，但描述文件和应用通常只有 7 天有效期。
 
 ## 构建和运行
 
