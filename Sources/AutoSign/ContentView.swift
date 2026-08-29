@@ -60,14 +60,14 @@ struct ContentView: View {
 
     private var statusColor: Color {
         switch model.stage {
-        case .failed: .red
+        case .failed: model.completedOutputURLs.isEmpty ? .red : .orange
         case .finished: .green
         default: .cyan
         }
     }
 
     private var deviceSection: some View {
-        card(title: "1  选择目标设备", symbol: "cable.connector") {
+        card(title: "1  选择目标设备（可多选）", symbol: "cable.connector") {
             VStack(spacing: 16) {
                 HStack {
                     Picker("设备类型", selection: Binding(get: { model.deviceKind }, set: { model.changeKind($0) })) {
@@ -78,6 +78,13 @@ struct ContentView: View {
                     .pickerStyle(.segmented)
                     .frame(maxWidth: 340)
                     Spacer()
+                    Text("已选 \(model.selectedDevices.count) 台")
+                        .font(.caption)
+                        .foregroundStyle(model.selectedDevices.isEmpty ? .orange : .secondary)
+                    Button(model.areAllReadyFilteredDevicesSelected ? "取消全选" : "全选可用设备") {
+                        model.toggleAllReadyFilteredDevices()
+                    }
+                    .disabled(!model.filteredDevices.contains(where: \.isReadyForInstallation))
                     Button { Task { await model.refresh() } } label: {
                         Label("刷新", systemImage: "arrow.clockwise")
                     }
@@ -130,8 +137,8 @@ struct ContentView: View {
     }
 
     private func deviceCard(_ device: AppleDevice) -> some View {
-        let selected = model.selectedDeviceID == device.id
-        return Button { model.selectedDeviceID = device.id } label: {
+        let selected = model.selectedDeviceIDs.contains(device.id)
+        return Button { model.toggleDeviceSelection(device) } label: {
             HStack(spacing: 12) {
                 Image(systemName: device.kind.symbol)
                     .font(.system(size: 26)).foregroundStyle(selected ? .cyan : .secondary)
@@ -142,6 +149,10 @@ struct ContentView: View {
                     Label(device.statusText, systemImage: device.isReadyForInstallation ? "checkmark.circle.fill" : "exclamationmark.triangle.fill")
                         .font(.caption2).foregroundStyle(device.isReadyForInstallation ? .green : .orange)
                 }
+                Spacer(minLength: 4)
+                Image(systemName: selected ? "checkmark.circle.fill" : "circle")
+                    .font(.title3)
+                    .foregroundStyle(selected ? .cyan : .secondary)
             }
             .padding(14).frame(minWidth: 250, alignment: .leading)
             .background(selected ? Color.cyan.opacity(0.12) : Color.white.opacity(0.045), in: RoundedRectangle(cornerRadius: 13))
@@ -200,7 +211,7 @@ struct ContentView: View {
                 Divider().opacity(0.35)
                 settingRow(title: "自动续签", symbol: "wifi") {
                     VStack(alignment: .trailing, spacing: 3) {
-                        Toggle("同一 Wi‑Fi 后台自动续签", isOn: Binding(
+                        Toggle("为已选设备后台自动续签", isOn: Binding(
                             get: { model.autoRefreshEnabled },
                             set: { model.setAutoRefreshEnabled($0) }
                         ))
@@ -224,7 +235,7 @@ struct ContentView: View {
                 guideRow(
                     symbol: "person.crop.circle.badge.checkmark",
                     title: "免费 Apple ID / Personal Team",
-                    text: "若描述文件不包含当前设备，AutoSign 会请 Xcode 自动注册并重建。请保持 Xcode 账号登录、Mac 联网，且设备已解锁并信任此 Mac。免费签名通常有效 7 天。"
+                    text: "若描述文件未包含某台已选设备，AutoSign 会请 Xcode 逐台注册并重建。请保持 Xcode 账号登录、Mac 联网，且所有设备均已解锁并信任此 Mac。免费签名通常有效 7 天。"
                 )
                 guideRow(
                     symbol: "person.2.badge.gearshape",
@@ -246,18 +257,20 @@ struct ContentView: View {
                 Image(systemName: statusIcon).foregroundStyle(statusColor)
                 Text(model.detail).font(.callout).foregroundStyle(model.stage.isRunning ? .primary : .secondary).lineLimit(2)
                 Spacer()
-                if case .finished = model.stage { Button("在访达中显示") { model.revealOutput() } }
+                if !model.completedOutputURLs.isEmpty {
+                    Button("在访达中显示") { model.revealOutputs() }
+                }
                 Button { model.install() } label: {
                     HStack(spacing: 9) {
                         if model.stage.isRunning { ProgressView().controlSize(.small) }
                         else { Image(systemName: "arrow.down.app.fill") }
-                        Text(model.stage.isRunning ? "处理中" : "一键签名并安装").fontWeight(.semibold)
+                        Text(actionButtonTitle).fontWeight(.semibold)
                     }
-                    .frame(minWidth: 150).padding(.vertical, 4)
+                    .frame(minWidth: 170).padding(.vertical, 4)
                 }
                 .buttonStyle(.borderedProminent).tint(.cyan).disabled(!model.canInstall)
             }
-            Text("签名过期后再次点击即可自动续期并重装；需要 Xcode 账号保持登录且 Mac 可以联网。")
+            Text("将使用同一份覆盖所有已选设备的描述文件逐台安装；后台续签也会保留这组设备。")
                 .font(.caption2).foregroundStyle(.tertiary).frame(maxWidth: .infinity, alignment: .leading)
         }
         .padding(18).background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 16))
@@ -270,6 +283,12 @@ struct ContentView: View {
         case .idle: "info.circle"
         default: "gearshape.2.fill"
         }
+    }
+
+    private var actionButtonTitle: String {
+        if model.stage.isRunning { return "处理中" }
+        let count = model.selectedDevices.count
+        return count > 1 ? "签名并安装到 \(count) 台" : "一键签名并安装"
     }
 
     private func card<Content: View>(title: String, symbol: String, @ViewBuilder content: () -> Content) -> some View {

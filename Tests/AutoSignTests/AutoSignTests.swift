@@ -58,6 +58,34 @@ import Testing
     #expect(!SigningService.profileNeedsRefresh(allDevicesProfile, for: "new-device", forceRefresh: false))
 }
 
+@Test func migratesLegacyDeviceSelectionAndTracksNewPendingDevices() throws {
+    let suiteName = "AutoSignTests.DeviceSelection.\(UUID().uuidString)"
+    let preferences = try #require(UserDefaults(suiteName: suiteName))
+    defer { preferences.removePersistentDomain(forName: suiteName) }
+
+    preferences.set("iphone-udid", forKey: DeviceSelectionStore.legacyDeviceUDIDKey)
+    #expect(DeviceSelectionStore.load(from: preferences) == ["iphone-udid"])
+
+    DeviceSelectionStore.save(["iphone-udid", "ipad-udid", "ipad-udid"], to: preferences)
+    #expect(DeviceSelectionStore.load(from: preferences) == ["iphone-udid", "ipad-udid"])
+    #expect(DeviceSelectionStore.loadPending(from: preferences) == ["ipad-udid"])
+    #expect(preferences.string(forKey: DeviceSelectionStore.legacyDeviceUDIDKey) == "iphone-udid")
+}
+
+@Test func removingDeviceSelectionAlsoRemovesItsPendingRetry() throws {
+    let suiteName = "AutoSignTests.PendingSelection.\(UUID().uuidString)"
+    let preferences = try #require(UserDefaults(suiteName: suiteName))
+    defer { preferences.removePersistentDomain(forName: suiteName) }
+
+    DeviceSelectionStore.save(["iphone-udid", "ipad-udid"], to: preferences)
+    #expect(Set(DeviceSelectionStore.loadPending(from: preferences)) == ["iphone-udid", "ipad-udid"])
+
+    DeviceSelectionStore.savePending(["ipad-udid"], to: preferences)
+    DeviceSelectionStore.save(["iphone-udid"], to: preferences)
+    #expect(DeviceSelectionStore.load(from: preferences) == ["iphone-udid"])
+    #expect(DeviceSelectionStore.loadPending(from: preferences).isEmpty)
+}
+
 @Test func integrationSignAndInstallWhenConfigured() async throws {
     let environment = ProcessInfo.processInfo.environment
     guard let ipaPath = environment["AUTOSIGN_INTEGRATION_IPA"],

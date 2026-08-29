@@ -5,7 +5,7 @@ import Foundation
 final class AppModel: ObservableObject {
     @Published var deviceKind: DeviceKind = .iPhone
     @Published var devices: [AppleDevice] = []
-    @Published var selectedDeviceID: String?
+    @Published private(set) var selectedDeviceIDs: Set<String> = []
     @Published var ipaURL: URL?
     @Published var profileURL: URL?
     @Published var identities: [SigningIdentity] = []
@@ -17,12 +17,19 @@ final class AppModel: ObservableObject {
     @Published var isDropTargeted = false
     @Published var autoRefreshEnabled = BackgroundRefreshManager.isInstalled
     @Published var lastBackgroundStatus = BackgroundRefreshManager.lastStatus
+    @Published private(set) var completedOutputURLs: [URL] = []
+
+    private var didInitializeDeviceSelection = false
 
     var filteredDevices: [AppleDevice] { devices.filter { $0.kind == deviceKind } }
-    var selectedDevice: AppleDevice? { devices.first { $0.id == selectedDeviceID } }
+    var selectedDevices: [AppleDevice] { devices.filter { selectedDeviceIDs.contains($0.id) } }
     var selectedIdentity: SigningIdentity? { identities.first { $0.id == selectedIdentityID } }
     var canInstall: Bool {
-        ipaURL != nil && profileURL != nil && selectedDevice?.isReadyForInstallation == true && !stage.isRunning
+        ipaURL != nil
+            && profileURL != nil
+            && !selectedDevices.isEmpty
+            && selectedDevices.allSatisfy(\.isReadyForInstallation)
+            && !stage.isRunning
     }
 
     init(performInitialRefresh: Bool = true) {
@@ -40,30 +47,27 @@ final class AppModel: ObservableObject {
         isRefreshing = true
         defer { isRefreshing = false }
         do {
+            let previouslySelectedUDIDs = Set(selectedDevices.map(\.udid))
             async let foundDevices = DeviceService.connectedDevices()
             async let foundIdentities = SigningService.identities()
             devices = try await foundDevices
             identities = try await foundIdentities
 
-            if let selectedDevice, !devices.contains(selectedDevice) { selectedDeviceID = nil }
-            if selectedDeviceID == nil {
-                let savedUDID = UserDefaults.standard.string(forKey: "deviceUDID")
-                if let saved = devices.first(where: { $0.udid == savedUDID }) {
-                    deviceKind = saved.kind
-                    selectedDeviceID = saved.id
-                } else if let first = filteredDevices.first(where: \.isConnected) {
-                    selectedDeviceID = first.id
-                } else if let first = devices.first(where: \.isConnected) {
-                    deviceKind = first.kind
-                    selectedDeviceID = first.id
-                } else if let first = filteredDevices.first ?? devices.first {
-                    deviceKind = first.kind
-                    selectedDeviceID = first.id
-                }
+            let persistedUDIDs = Set(DeviceSelectionStore.load(from: .standard))
+            let desiredUDIDs = previouslySelectedUDIDs.isEmpty ? persistedUDIDs : previouslySelectedUDIDs
+            selectedDeviceIDs = Set(devices.filter { desiredUDIDs.contains($0.udid) }.map(\.id))
+            if selectedDeviceIDs.isEmpty && !didInitializeDeviceSelection && desiredUDIDs.isEmpty {
+                let readyDevices = devices.filter(\.isReadyForInstallation)
+                let initialDevices = readyDevices.isEmpty ? Array(devices.prefix(1)) : readyDevices
+                selectedDeviceIDs = Set(initialDevices.map(\.id))
+            }
+            didInitializeDeviceSelection = true
+            if let firstSelected = selectedDevices.first {
+                deviceKind = firstSelected.kind
             }
             if !identities.contains(where: { $0.id == selectedIdentityID }) { selectedIdentityID = identities.first?.id }
             if profileURL == nil || !FileManager.default.fileExists(atPath: profileURL?.path ?? "") {
-                profileURL = await SigningService.bestInstalledProfileURL(for: selectedDevice)
+                profileURL = await SigningService.bestInstalledProfileURL(for: selectedDevices.first)
                 if let profileURL { UserDefaults.standard.set(profileURL.path, forKey: "profilePath") }
             }
             detail = devices.isEmpty ? "未发现设备，请通过 USB 连接并在设备上点“信任”" : "已刷新设备和签名证书"
@@ -75,15 +79,51 @@ final class AppModel: ObservableObject {
 
     func changeKind(_ kind: DeviceKind) {
         deviceKind = kind
-        if selectedDevice?.kind != kind {
-            selectedDeviceID = filteredDevices.first(where: \.isConnected)?.id ?? filteredDevices.first?.id
+    }
+
+    func toggleDeviceSelection(_ device: AppleDevice) {
+        if selectedDeviceIDs.contains(device.id) {
+            selectedDeviceIDs.remove(device.id)
+        } else {
+            selectedDeviceIDs.insert(device.id)
         }
+        persistSelectedDevices()
+        stage = .idle
+        detail = selectionDetail
+    }
+
+    func toggleAllReadyFilteredDevices() {
+        let readyIDs = Set(filteredDevices.filter(\.isReadyForInstallation).map(\.id))
+        guard !readyIDs.isEmpty else { return }
+        if readyIDs.isSubset(of: selectedDeviceIDs) {
+            selectedDeviceIDs.subtract(readyIDs)
+        } else {
+            selectedDeviceIDs.formUnion(readyIDs)
+        }
+        persistSelectedDevices()
+        stage = .idle
+        detail = selectionDetail
+    }
+
+    var areAllReadyFilteredDevicesSelected: Bool {
+        let readyIDs = Set(filteredDevices.filter(\.isReadyForInstallation).map(\.id))
+        return !readyIDs.isEmpty && readyIDs.isSubset(of: selectedDeviceIDs)
+    }
+
+    var selectionDetail: String {
+        guard !selectedDevices.isEmpty else { return "请选择至少一台目标设备" }
+        let unavailable = selectedDevices.filter { !$0.isReadyForInstallation }.count
+        if unavailable > 0 {
+            return "已选择 \(selectedDevices.count) 台设备，其中 \(unavailable) 台暂不可安装"
+        }
+        return "已选择 \(selectedDevices.count) 台设备，可同时签名安装"
     }
 
     func pair(_ device: AppleDevice) {
         guard pairingDeviceID == nil else { return }
         pairingDeviceID = device.id
-        selectedDeviceID = device.id
+        selectedDeviceIDs.insert(device.id)
+        persistSelectedDevices()
         stage = .idle
         detail = "正在发起配对，请保持 \(device.name) 解锁并留意设备上的确认提示…"
         Task {
@@ -141,39 +181,88 @@ final class AppModel: ObservableObject {
     }
 
     func install() {
-        guard let ipaURL, let profileURL, let selectedDevice else {
-            stage = .failed("请先完成设备、IPA 和描述文件选择。")
+        guard let ipaURL, let profileURL, !selectedDevices.isEmpty else {
+            stage = .failed("请先完成目标设备、IPA 和描述文件选择。")
             return
         }
+        let targets = selectedDevices
+        guard targets.allSatisfy(\.isReadyForInstallation) else {
+            let names = targets.filter { !$0.isReadyForInstallation }.map(\.name).joined(separator: "、")
+            stage = .failed("以下设备暂不可安装：\(names)")
+            return
+        }
+        DeviceSelectionStore.save(targets.map(\.udid), to: .standard)
         Task {
-            do {
-                let activeProfile = try await SigningService.ensureUsableProfile(
-                    at: profileURL,
-                    for: selectedDevice,
-                    forceRefresh: identities.isEmpty
-                ) { [weak self] message in
-                    self?.stage = .preparing
-                    self?.detail = message
+            completedOutputURLs = []
+            stage = .preparing
+            detail = "正在为 \(targets.count) 台设备准备描述文件…"
+            var activeProfile = profileURL
+            var preparedDevices: [AppleDevice] = []
+            var failures: [String] = []
+            var failedUDIDs = Set<String>()
+            var shouldForceRefresh = identities.isEmpty
+
+            for (index, device) in targets.enumerated() {
+                do {
+                    activeProfile = try await SigningService.ensureUsableProfile(
+                        at: activeProfile,
+                        for: device,
+                        forceRefresh: shouldForceRefresh
+                    ) { [weak self] message in
+                        self?.stage = .preparing
+                        self?.detail = "[\(index + 1)/\(targets.count)] \(message)"
+                    }
+                    shouldForceRefresh = false
+                    preparedDevices.append(device)
+                } catch {
+                    failures.append("\(device.name)：\(error.localizedDescription)")
+                    failedUDIDs.insert(device.udid)
                 }
-                self.profileURL = activeProfile
-                UserDefaults.standard.set(activeProfile.path, forKey: "profilePath")
-                UserDefaults.standard.set(selectedDevice.udid, forKey: "deviceUDID")
+            }
+
+            self.profileURL = activeProfile
+            UserDefaults.standard.set(activeProfile.path, forKey: "profilePath")
+
+            do {
                 identities = try await SigningService.identities()
                 guard let identity = identities.first(where: { $0.id == selectedIdentityID }) ?? identities.first else {
                     throw AutoSignError.missingSelection("Xcode 未能创建 Apple Development 签名证书。")
                 }
                 rememberIdentity(identity.id)
-                let output = try await SigningService.signAndInstall(
-                    ipa: ipaURL, profileURL: activeProfile, identity: identity, device: selectedDevice
-                ) { [weak self] stage, message in
-                    self?.stage = stage
-                    self?.detail = message
+
+                for (index, device) in preparedDevices.enumerated() {
+                    do {
+                        let output = try await SigningService.signAndInstall(
+                            ipa: ipaURL, profileURL: activeProfile, identity: identity, device: device
+                        ) { [weak self] stage, message in
+                            self?.stage = stage
+                            self?.detail = "[\(index + 1)/\(preparedDevices.count)] \(device.name)：\(message)"
+                        }
+                        completedOutputURLs.append(output)
+                    } catch {
+                        failures.append("\(device.name)：\(error.localizedDescription)")
+                        failedUDIDs.insert(device.udid)
+                    }
                 }
-                stage = .finished(output)
-                detail = "已安装到 \(selectedDevice.name)，并保存 \(output.lastPathComponent)"
             } catch {
-                stage = .failed(error.localizedDescription)
-                detail = error.localizedDescription
+                failures.append(error.localizedDescription)
+                failedUDIDs.formUnion(preparedDevices.map(\.udid))
+            }
+
+            DeviceSelectionStore.savePending(
+                targets.map(\.udid).filter { failedUDIDs.contains($0) }, to: .standard
+            )
+
+            if failures.isEmpty, let output = completedOutputURLs.last {
+                stage = .finished(output)
+                detail = "已完成：应用已安装到 \(targets.count) 台设备，并保存 \(completedOutputURLs.count) 个签名副本"
+            } else {
+                let completed = completedOutputURLs.count
+                let summary = failures.joined(separator: "；")
+                stage = .failed(summary)
+                detail = completed > 0
+                    ? "已完成 \(completed)/\(targets.count) 台；失败：\(summary)"
+                    : "多设备安装失败：\(summary)"
             }
         }
     }
@@ -199,8 +288,12 @@ final class AppModel: ObservableObject {
         }
     }
 
-    func revealOutput() {
-        guard case .finished(let url) = stage else { return }
-        NSWorkspace.shared.activateFileViewerSelecting([url])
+    func revealOutputs() {
+        guard !completedOutputURLs.isEmpty else { return }
+        NSWorkspace.shared.activateFileViewerSelecting(completedOutputURLs)
+    }
+
+    private func persistSelectedDevices() {
+        DeviceSelectionStore.save(selectedDevices.map(\.udid), to: .standard)
     }
 }

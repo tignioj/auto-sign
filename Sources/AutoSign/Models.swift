@@ -32,6 +32,60 @@ struct AppleDevice: Identifiable, Hashable, Sendable {
     }
 }
 
+enum DeviceSelectionStore {
+    static let deviceUDIDsKey = "deviceUDIDs"
+    static let legacyDeviceUDIDKey = "deviceUDID"
+    static let pendingDeviceUDIDsKey = "pendingDeviceUDIDs"
+
+    static func load(from preferences: UserDefaults) -> [String] {
+        let stored = preferences.stringArray(forKey: deviceUDIDsKey) ?? []
+        let candidates: [String]
+        if stored.isEmpty, let legacy = preferences.string(forKey: legacyDeviceUDIDKey) {
+            candidates = [legacy]
+        } else {
+            candidates = stored
+        }
+        var seen = Set<String>()
+        return candidates.filter { !$0.isEmpty && seen.insert($0).inserted }
+    }
+
+    static func save(_ udids: [String], to preferences: UserDefaults) {
+        let previous = Set(load(from: preferences))
+        var seen = Set<String>()
+        let normalized = udids.filter { !$0.isEmpty && seen.insert($0).inserted }
+        let normalizedSet = Set(normalized)
+        if normalized.isEmpty {
+            preferences.removeObject(forKey: deviceUDIDsKey)
+            preferences.removeObject(forKey: legacyDeviceUDIDKey)
+            savePending([], to: preferences)
+        } else {
+            preferences.set(normalized, forKey: deviceUDIDsKey)
+            // Keep the legacy key so an older installed copy still has a usable target.
+            preferences.set(normalized[0], forKey: legacyDeviceUDIDKey)
+            var pending = Set(loadPending(from: preferences))
+            pending.formIntersection(normalizedSet)
+            pending.formUnion(normalizedSet.subtracting(previous))
+            savePending(normalized.filter { pending.contains($0) }, to: preferences)
+        }
+    }
+
+    static func loadPending(from preferences: UserDefaults) -> [String] {
+        var seen = Set<String>()
+        return (preferences.stringArray(forKey: pendingDeviceUDIDsKey) ?? [])
+            .filter { !$0.isEmpty && seen.insert($0).inserted }
+    }
+
+    static func savePending(_ udids: [String], to preferences: UserDefaults) {
+        var seen = Set<String>()
+        let normalized = udids.filter { !$0.isEmpty && seen.insert($0).inserted }
+        if normalized.isEmpty {
+            preferences.removeObject(forKey: pendingDeviceUDIDsKey)
+        } else {
+            preferences.set(normalized, forKey: pendingDeviceUDIDsKey)
+        }
+    }
+}
+
 struct SigningIdentity: Identifiable, Hashable, Sendable {
     let hash: String
     let name: String
