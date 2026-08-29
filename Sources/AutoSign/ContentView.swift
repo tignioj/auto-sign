@@ -114,25 +114,51 @@ struct ContentView: View {
                                         .buttonStyle(.borderedProminent)
                                         .tint(.indigo)
                                         .disabled(model.pairingDeviceID != nil)
-                                    } else if !device.developerModeEnabled {
-                                        Label {
-                                            Text("在设备上打开：设置 → 隐私与安全性 → 向下滑到“安全性”区域 → 开发者模式")
-                                                .fixedSize(horizontal: false, vertical: true)
-                                        } icon: {
-                                            Image(systemName: "gearshape.fill")
-                                        }
-                                        .font(.caption)
-                                        .foregroundStyle(.orange)
-                                        .padding(10)
-                                        .frame(maxWidth: 250, alignment: .leading)
-                                        .background(Color.orange.opacity(0.1), in: RoundedRectangle(cornerRadius: 10))
                                     }
                                 }
+                                .frame(width: 250)
                             }
                         }
                     }
+
+                    if !devicesRequiringDeveloperMode.isEmpty {
+                        developerModeNotice
+                    }
                 }
             }
+        }
+    }
+
+    private var devicesRequiringDeveloperMode: [AppleDevice] {
+        model.filteredDevices.filter { $0.isPaired && !$0.developerModeEnabled }
+    }
+
+    private var developerModeNotice: some View {
+        HStack(alignment: .top, spacing: 12) {
+            Image(systemName: "gearshape.fill")
+                .font(.callout.weight(.semibold))
+                .foregroundStyle(.orange)
+                .frame(width: 28, height: 28)
+                .background(Color.orange.opacity(0.14), in: Circle())
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text("请在 \(devicesRequiringDeveloperMode.count) 台设备上开启开发者模式")
+                    .font(.callout.weight(.semibold))
+                Text("前往“设置 → 隐私与安全性 → 开发者模式”，开启后按提示重启设备，再返回这里刷新。")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .foregroundStyle(.orange)
+        .padding(.horizontal, 14)
+        .padding(.vertical, 12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color.orange.opacity(0.09), in: RoundedRectangle(cornerRadius: 12))
+        .overlay {
+            RoundedRectangle(cornerRadius: 12)
+                .stroke(Color.orange.opacity(0.22))
         }
     }
 
@@ -144,17 +170,17 @@ struct ContentView: View {
                     .font(.system(size: 26)).foregroundStyle(selected ? .cyan : .secondary)
                     .frame(width: 34)
                 VStack(alignment: .leading, spacing: 4) {
-                    Text(device.name).font(.headline)
-                    Text("\(device.marketingName) · \(device.osVersion)").font(.caption).foregroundStyle(.secondary)
+                    Text(device.name).font(.headline).lineLimit(1)
+                    Text("\(device.marketingName) · \(device.osVersion)").font(.caption).foregroundStyle(.secondary).lineLimit(1)
                     Label(device.statusText, systemImage: device.isReadyForInstallation ? "checkmark.circle.fill" : "exclamationmark.triangle.fill")
-                        .font(.caption2).foregroundStyle(device.isReadyForInstallation ? .green : .orange)
+                        .font(.caption2).foregroundStyle(device.isReadyForInstallation ? .green : .orange).lineLimit(1)
                 }
                 Spacer(minLength: 4)
                 Image(systemName: selected ? "checkmark.circle.fill" : "circle")
                     .font(.title3)
                     .foregroundStyle(selected ? .cyan : .secondary)
             }
-            .padding(14).frame(minWidth: 250, alignment: .leading)
+            .padding(14).frame(width: 250, alignment: .leading)
             .background(selected ? Color.cyan.opacity(0.12) : Color.white.opacity(0.045), in: RoundedRectangle(cornerRadius: 13))
             .overlay(RoundedRectangle(cornerRadius: 13).stroke(selected ? Color.cyan.opacity(0.7) : Color.white.opacity(0.08)))
         }
