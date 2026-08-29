@@ -233,6 +233,11 @@ struct ContentView: View {
                     text: "开发者模式只允许设备运行开发 App，不会自动把 UDID 写入描述文件。"
                 )
                 guideRow(
+                    symbol: "checkmark.shield.fill",
+                    title: "首次打开 App：信任开发者",
+                    text: "首次安装完成后，请在 iPhone 或 iPad 上打开“设置 → 通用 → VPN 与设备管理”，在“开发者 App”下选择本次签名使用的开发者并点“信任”，然后再打开应用。每台设备通常只需操作一次；更换签名身份后可能需要重新信任。"
+                )
+                guideRow(
                     symbol: "person.crop.circle.badge.checkmark",
                     title: "免费 Apple ID / Personal Team",
                     text: "若描述文件未包含某台已选设备，AutoSign 会请 Xcode 逐台注册并重建。请保持 Xcode 账号登录、Mac 联网，且所有设备均已解锁并信任此 Mac。免费签名通常有效 7 天。"
