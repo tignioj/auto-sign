@@ -32,7 +32,7 @@ enum BackgroundRefreshManager {
             "Label": label,
             "ProgramArguments": [executable.path, "--background-refresh"],
             "RunAtLoad": true,
-            "StartInterval": 1_800,
+            "StartInterval": Int(RefreshStatusStore.interval),
             "ProcessType": "Background",
             "StandardOutPath": logs.appendingPathComponent("refresh.log").path,
             "StandardErrorPath": logs.appendingPathComponent("refresh-error.log").path

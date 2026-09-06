@@ -19,6 +19,32 @@ final class AppModel: ObservableObject {
     @Published var lastBackgroundStatus = BackgroundRefreshManager.lastStatus
     @Published private(set) var completedOutputURLs: [URL] = []
 
+    @Published var accountStatus = AccountStatus()
+    @Published var renewalStatuses: [DeviceRefreshStatus] = []
+    @Published var nextBackgroundCheck: Date?
+    @Published var profileExpiration: Date?
+    @Published var schedulerStatus = "正在检查后台任务…"
+
+    func refreshDashboard() async {
+        accountStatus = await AccountStatus.inspect()
+        autoRefreshEnabled = BackgroundRefreshManager.isInstalled
+        lastBackgroundStatus = BackgroundRefreshManager.lastStatus
+        let preferences = UserDefaults.standard
+        nextBackgroundCheck = (preferences.object(forKey: "backgroundCheckStarted") as? Date)?.addingTimeInterval(RefreshStatusStore.interval)
+        renewalStatuses = DeviceSelectionStore.load(from: preferences).map { udid in
+            var status = RefreshStatusStore.load(udid) ?? DeviceRefreshStatus(id: udid, name: udid)
+            if let device = devices.first(where: { $0.udid == udid }) { status.name = device.name }
+            return status
+        }
+        if let path = preferences.string(forKey: "profilePath") {
+            profileExpiration = (try? await SigningService.readProfile(at: URL(fileURLWithPath: path)))?.expirationDate
+        } else { profileExpiration = nil }
+        if autoRefreshEnabled {
+            let result = try? await ProcessRunner.run("/bin/launchctl", ["print", "gui/\(getuid())/\(BackgroundRefreshManager.label)"])
+            schedulerStatus = result?.status == 0 ? "后台任务已加载 · 每 30 分钟检查" : "后台任务未加载，请关闭再开启自动续签"
+        } else { schedulerStatus = "后台自动续签已关闭" }
+    }
+
     private var didInitializeDeviceSelection = false
 
     var filteredDevices: [AppleDevice] { devices.filter { $0.kind == deviceKind } }
@@ -44,6 +70,8 @@ final class AppModel: ObservableObject {
     }
 
     func refresh() async {
+        guard !isRefreshing else { return }
+        await refreshDashboard()
         isRefreshing = true
         defer { isRefreshing = false }
         do {
@@ -70,6 +98,7 @@ final class AppModel: ObservableObject {
                 profileURL = await SigningService.bestInstalledProfileURL(for: selectedDevices.first)
                 if let profileURL { UserDefaults.standard.set(profileURL.path, forKey: "profilePath") }
             }
+            await refreshDashboard()
             detail = devices.isEmpty ? "未发现设备，请通过 USB 连接并在设备上点“信任”" : "已刷新设备和签名证书"
         } catch {
             stage = .failed(error.localizedDescription)
@@ -204,6 +233,7 @@ final class AppModel: ObservableObject {
 
             for (index, device) in targets.enumerated() {
                 do {
+                    RefreshStatusStore.record(device.udid, name: device.name, state: "正在准备手动签名")
                     activeProfile = try await SigningService.ensureUsableProfile(
                         at: activeProfile,
                         for: device,
@@ -215,6 +245,7 @@ final class AppModel: ObservableObject {
                     shouldForceRefresh = false
                     preparedDevices.append(device)
                 } catch {
+                    RefreshStatusStore.record(device.udid, name: device.name, state: "手动安装失败", failure: error.localizedDescription)
                     failures.append("\(device.name)：\(error.localizedDescription)")
                     failedUDIDs.insert(device.udid)
                 }
@@ -238,8 +269,11 @@ final class AppModel: ObservableObject {
                             self?.stage = stage
                             self?.detail = "[\(index + 1)/\(preparedDevices.count)] \(device.name)：\(message)"
                         }
+                        let installedProfile = try await SigningService.readProfile(at: activeProfile)
+                        RefreshStatusStore.record(device.udid, name: device.name, state: "手动签名安装成功", expiration: installedProfile.expirationDate, success: true)
                         completedOutputURLs.append(output)
                     } catch {
+                        RefreshStatusStore.record(device.udid, name: device.name, state: "手动安装失败", failure: error.localizedDescription)
                         failures.append("\(device.name)：\(error.localizedDescription)")
                         failedUDIDs.insert(device.udid)
                     }
@@ -247,12 +281,16 @@ final class AppModel: ObservableObject {
             } catch {
                 failures.append(error.localizedDescription)
                 failedUDIDs.formUnion(preparedDevices.map(\.udid))
+                for device in preparedDevices {
+                    RefreshStatusStore.record(device.udid, name: device.name, state: "手动安装失败", failure: error.localizedDescription)
+                }
             }
 
             DeviceSelectionStore.savePending(
                 targets.map(\.udid).filter { failedUDIDs.contains($0) }, to: .standard
             )
 
+            await refreshDashboard()
             if failures.isEmpty, let output = completedOutputURLs.last {
                 stage = .finished(output)
                 detail = "已完成：应用已安装到 \(targets.count) 台设备，并保存 \(completedOutputURLs.count) 个签名副本"

@@ -126,3 +126,31 @@ import Testing
     ) { _, _ in }
     #expect(FileManager.default.fileExists(atPath: output.path))
 }
+
+@Test func deviceFailurePreservesInstalledExpiryAndSuccessClearsFailure() throws {
+    let suite = "AutoSignTests.Status.\(UUID().uuidString)"
+    let preferences = try #require(UserDefaults(suiteName: suite))
+    defer { preferences.removePersistentDomain(forName: suite) }
+    let expiry = Date().addingTimeInterval(100_000)
+    RefreshStatusStore.record("one", name: "iPhone", state: "成功", expiration: expiry, success: true, preferences: preferences)
+    RefreshStatusStore.record("two", name: "iPad", state: "等待连接", failure: "离线", preferences: preferences)
+    RefreshStatusStore.record("one", state: "失败", failure: "No Accounts", preferences: preferences)
+    let failed = try #require(RefreshStatusStore.load("one", preferences: preferences))
+    #expect(failed.expiration == expiry)
+    #expect(failed.lastSuccess != nil)
+    #expect(failed.failure == "No Accounts")
+    #expect(RefreshStatusStore.load("two", preferences: preferences)?.failure == "离线")
+    RefreshStatusStore.record("one", state: "成功", expiration: expiry, success: true, preferences: preferences)
+    #expect(RefreshStatusStore.load("one", preferences: preferences)?.failure == nil)
+}
+
+@Test func scheduleDistinguishesDisabledOverdueAndRenewalWindow() {
+    let now = Date(timeIntervalSince1970: 1_000_000)
+    let check = now.addingTimeInterval(1_800)
+    let status = DeviceRefreshStatus(id: "one", name: "iPhone", expiration: now.addingTimeInterval(7 * 86_400))
+    #expect(status.nextAttempt(check: check, enabled: false, now: now) == "自动续签已关闭")
+    #expect(status.nextAttempt(check: nil, enabled: true, now: now) == "等待首次后台检查")
+    #expect(status.nextAttempt(check: now.addingTimeInterval(-1), enabled: true, now: now).contains("检查时间已到"))
+    #expect(status.nextAttempt(check: check, enabled: true, now: now).contains(now.addingTimeInterval(6 * 86_400).formatted(date: .abbreviated, time: .shortened)))
+    #expect(RefreshStatusStore.failureSummary("error: No Accounts: Add a new account").contains("Xcode 未读取到可用账号"))
+}

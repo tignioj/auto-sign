@@ -6,15 +6,22 @@ enum BackgroundRefreshCoordinator {
     private static let renewalWindow: TimeInterval = 24 * 60 * 60
 
     static func run() async {
+        UserDefaults.standard.set(Date(), forKey: "backgroundCheckStarted")
         do {
             let preferences = UserDefaults.standard
             guard let ipaPath = preferences.string(forKey: "ipaPath"),
                   FileManager.default.fileExists(atPath: ipaPath) else {
+                for udid in DeviceSelectionStore.load(from: .standard) {
+                    RefreshStatusStore.record(udid, state: "续签配置不完整", failure: "等待用户在 AutoSign 中选择 IPA")
+                }
                 BackgroundRefreshManager.record("等待用户在 AutoSign 中选择 IPA")
                 return
             }
             guard let profilePath = preferences.string(forKey: "profilePath"),
                   FileManager.default.fileExists(atPath: profilePath) else {
+                for udid in DeviceSelectionStore.load(from: .standard) {
+                    RefreshStatusStore.record(udid, state: "续签配置不完整", failure: "找不到上次使用的描述文件")
+                }
                 BackgroundRefreshManager.record("找不到上次使用的描述文件")
                 return
             }
@@ -33,7 +40,10 @@ enum BackgroundRefreshCoordinator {
             DeviceSelectionStore.savePending(targetUDIDs.filter { pendingSet.contains($0) }, to: preferences)
             guard renewalDue || !pendingSet.isEmpty else {
                 let days = max(1, Int(ceil(remaining / 86_400)))
-                BackgroundRefreshManager.record("\(targetUDIDs.count) 台设备签名正常，剩余约 \(days) 天")
+                for udid in targetUDIDs {
+                    RefreshStatusStore.record(udid, state: "未到续签窗口（描述文件剩余约 \(days) 天）", nextEligible: oldProfile.expirationDate.addingTimeInterval(-renewalWindow))
+                }
+                BackgroundRefreshManager.record("当前描述文件剩余约 \(days) 天，未到续签窗口；设备安装状态见各设备记录")
                 return
             }
 
@@ -41,6 +51,14 @@ enum BackgroundRefreshCoordinator {
             let candidateUDIDs = renewalDue ? targetUDIDs : targetUDIDs.filter { pendingSet.contains($0) }
             let connectedDevices = candidateUDIDs.compactMap { udid in
                 devices.first(where: { $0.udid == udid && $0.isConnected })
+            }
+            for udid in candidateUDIDs {
+                let device = devices.first { $0.udid == udid }
+                if device?.isConnected != true {
+                    RefreshStatusStore.record(udid, name: device?.name, state: "等待设备连接", failure: "设备未连接，下一次后台检查时重试。")
+                } else if device?.developerModeEnabled != true {
+                    RefreshStatusStore.record(udid, name: device?.name, state: "需要开启开发者模式", failure: "请在设备设置中开启开发者模式。")
+                }
             }
             let unavailableCount = candidateUDIDs.count - connectedDevices.count
             let readyDevices = connectedDevices.filter(\.developerModeEnabled)
@@ -60,6 +78,7 @@ enum BackgroundRefreshCoordinator {
             var shouldForceRefresh = renewalDue
             for (index, device) in readyDevices.enumerated() {
                 do {
+                    RefreshStatusStore.record(device.udid, name: device.name, state: "正在请求续签")
                     activeProfileURL = try await SigningService.ensureUsableProfile(
                         at: activeProfileURL, for: device, forceRefresh: shouldForceRefresh
                     ) { message in
@@ -68,6 +87,7 @@ enum BackgroundRefreshCoordinator {
                     shouldForceRefresh = false
                     preparedDevices.append(device)
                 } catch {
+                    RefreshStatusStore.record(device.udid, name: device.name, state: "续签失败", failure: error.localizedDescription)
                     failures.append("\(device.name)：\(error.localizedDescription)")
                 }
             }
@@ -84,6 +104,9 @@ enum BackgroundRefreshCoordinator {
             // Before expiry Xcode may return the existing profile. Avoid a pointless reinstall;
             // launchd will retry and obtain a new profile as soon as Apple expires the old one.
             if renewalDue && !didRenew && pendingSet.isEmpty {
+                for device in preparedDevices {
+                    RefreshStatusStore.record(device.udid, name: device.name, state: "等待 Apple 发放新描述文件")
+                }
                 var message = "已进入续期窗口，等待 Apple 发放新签名"
                 if unavailableCount > 0 { message += "；\(unavailableCount) 台设备未连接" }
                 if !failures.isEmpty { message += "；\(failures.joined(separator: "；"))" }
@@ -114,6 +137,7 @@ enum BackgroundRefreshCoordinator {
             var completedDevices: [AppleDevice] = []
             for (index, device) in devicesToInstall.enumerated() {
                 do {
+                    RefreshStatusStore.record(device.udid, name: device.name, state: "正在签名并安装")
                     let output = backgroundFolder.appendingPathComponent("last-signed-\(device.udid).ipa")
                     _ = try await SigningService.signAndInstall(
                         ipa: URL(fileURLWithPath: ipaPath),
@@ -124,9 +148,11 @@ enum BackgroundRefreshCoordinator {
                     ) { _, message in
                         BackgroundRefreshManager.record("[\(index + 1)/\(devicesToInstall.count)] \(device.name)：\(message)")
                     }
+                    RefreshStatusStore.record(device.udid, name: device.name, state: "自动续签成功", expiration: renewedProfile.expirationDate, success: true)
                     completedDevices.append(device)
                     remainingPending.remove(device.udid)
                 } catch {
+                    RefreshStatusStore.record(device.udid, name: device.name, state: "续签失败", failure: error.localizedDescription)
                     failures.append("\(device.name)：\(error.localizedDescription)")
                 }
             }
@@ -152,6 +178,9 @@ enum BackgroundRefreshCoordinator {
                 await BackgroundRefreshManager.notify(title: "AutoSign 自动续签部分完成", body: status)
             }
         } catch {
+            for udid in DeviceSelectionStore.load(from: .standard) {
+                RefreshStatusStore.record(udid, state: "后台检查失败", failure: error.localizedDescription)
+            }
             BackgroundRefreshManager.record("自动续签失败：\(error.localizedDescription)")
             await BackgroundRefreshManager.notify(title: "AutoSign 自动续签失败", body: error.localizedDescription)
         }

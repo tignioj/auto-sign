@@ -14,6 +14,7 @@ struct ContentView: View {
             ScrollView {
                 VStack(spacing: 20) {
                     header
+                    renewalDashboard
                     deviceSection
                     ipaSection
                     signingSection
@@ -24,6 +25,75 @@ struct ContentView: View {
             }
         }
         .preferredColorScheme(.dark)
+        .task {
+            while !Task.isCancelled {
+                await model.refreshDashboard()
+                do { try await Task.sleep(for: .seconds(15)) } catch { break }
+            }
+        }
+    }
+
+    private var renewalDashboard: some View {
+        card(title: "账号与自动续签", symbol: "clock.arrow.circlepath") {
+            VStack(alignment: .leading, spacing: 12) {
+                HStack {
+                    Label(model.accountStatus.title, systemImage: "person.crop.circle")
+                        .font(.headline)
+                    Spacer()
+                    Button("刷新状态") { Task { await model.refreshDashboard() } }
+                }
+                Text(model.accountStatus.detail).font(.caption).foregroundStyle(.secondary)
+                Divider()
+                Text(model.schedulerStatus).font(.callout)
+                Text("下次后台检查：" + nextCheckText).font(.callout)
+                if let expiration = model.profileExpiration {
+                    Text("当前描述文件到期：\(dateText(expiration)) · 续签窗口：\(dateText(expiration.addingTimeInterval(-86_400)))起")
+                        .font(.caption).foregroundStyle(expiration < Date() ? .orange : .secondary)
+                }
+                Text("时间为预计值；Mac 休眠、设备离线或 Apple 未发放新描述文件时会延后。设备到期时间仅在本工具确认安装成功后记录。")
+                    .font(.caption).foregroundStyle(.secondary)
+                if model.renewalStatuses.isEmpty {
+                    Text("尚未选择自动续签设备").foregroundStyle(.secondary)
+                }
+                ForEach(model.renewalStatuses) { status in
+                    VStack(alignment: .leading, spacing: 6) {
+                        HStack {
+                            Text(status.name).font(.headline)
+                            Spacer()
+                            Text(status.state).foregroundStyle(status.failure == nil ? Color.cyan : Color.orange)
+                        }
+                        Text("最近记录：\(dateText(status.updatedAt))  ·  最近成功：\(dateText(status.lastSuccess))")
+                        Text("设备签名到期：\(dateText(status.expiration))")
+                        Text("下次续签：" + status.nextAttempt(check: model.nextBackgroundCheck, enabled: model.autoRefreshEnabled))
+                        if let failure = status.failure {
+                            Text("失败原因：" + RefreshStatusStore.failureSummary(failure)).foregroundStyle(.orange)
+                            DisclosureGroup("完整错误详情") {
+                                Text(failure).font(.caption.monospaced()).textSelection(.enabled)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                            }
+                        }
+                    }
+                    .font(.caption)
+                    .padding(12)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(.white.opacity(0.035), in: RoundedRectangle(cornerRadius: 10))
+                }
+                DisclosureGroup("最近后台检查详情（含旧版本记录）") {
+                    Text(model.lastBackgroundStatus).font(.caption).textSelection(.enabled)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+            }
+        }
+    }
+
+    private var nextCheckText: String {
+        guard model.autoRefreshEnabled else { return "已关闭" }
+        guard let date = model.nextBackgroundCheck else { return "等待首次后台检查" }
+        return date < Date() ? "计划时间已到，等待后台运行" : "预计 " + dateText(date)
+    }
+
+    private func dateText(_ date: Date?) -> String {
+        date?.formatted(date: .abbreviated, time: .shortened) ?? "暂无记录"
     }
 
     private var header: some View {
