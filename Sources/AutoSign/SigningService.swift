@@ -70,17 +70,22 @@ enum SigningService {
         let derivedData = appSupport.appendingPathComponent("ProvisioningDerivedData", isDirectory: true)
         try FileManager.default.createDirectory(at: derivedData, withIntermediateDirectories: true)
 
-        _ = try await ProcessRunner.checked(
-            "/usr/bin/xcrun",
-            [
-                "xcodebuild", "-project", project.path, "-scheme", "ProvisioningHelper",
-                "-configuration", "Debug", "-destination", "id=\(device.udid)",
-                "-derivedDataPath", derivedData.path, "-allowProvisioningUpdates",
-                "-allowProvisioningDeviceRegistration", "DEVELOPMENT_TEAM=\(profile.teamIdentifier)",
-                "PRODUCT_BUNDLE_IDENTIFIER=\(bundleID)", "build"
-            ],
-            context: "Xcode 自动续期失败。请确认网络正常，且 Xcode 账号仍处于登录状态。"
-        )
+        try await DevicePreparationRetry.run {
+            _ = try await ProcessRunner.checked(
+                "/usr/bin/xcrun",
+                [
+                    "xcodebuild", "-project", project.path, "-scheme", "ProvisioningHelper",
+                    "-configuration", "Debug", "-destination", "id=\(device.udid)",
+                    "-derivedDataPath", derivedData.path, "-allowProvisioningUpdates",
+                    "-allowProvisioningDeviceRegistration", "DEVELOPMENT_TEAM=\(profile.teamIdentifier)",
+                    "PRODUCT_BUNDLE_IDENTIFIER=\(bundleID)", "build"
+                ],
+                context: "Xcode 自动续期失败，具体原因见下方详情。"
+            )
+        } beforeRetry: {
+            await statusChanged("\(device.name) 的开发者服务尚未准备好，等待 15 秒后自动重试 1 次…")
+            try await Task.sleep(for: .seconds(15))
+        }
 
         let generated = derivedData
             .appendingPathComponent("Build/Products/Debug-iphoneos/ProvisioningHelper.app/embedded.mobileprovision")

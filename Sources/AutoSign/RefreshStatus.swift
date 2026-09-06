@@ -42,7 +42,7 @@ enum RefreshStatusStore {
 
     static func failureSummary(_ raw: String) -> String {
         if raw.contains("No Accounts") { return "Xcode 未读取到可用账号。请在 Xcode → Settings → Apple Accounts 检查登录状态。" }
-        if raw.contains("developer disk image") { return "无法挂载开发者磁盘镜像。请解锁设备，通过 USB 连接并在 Xcode 中检查设备支持。" }
+        if raw.localizedCaseInsensitiveContains("developer disk image") { return "开发者磁盘镜像挂载失败。请解锁设备后重试；若仍失败，通过 USB 连接并在 Xcode 中检查设备支持。" }
         if raw.localizedCaseInsensitiveContains("locked") { return "设备或钥匙串已锁定，请解锁后重试。" }
         return raw.split(separator: "\n").first.map(String.init) ?? raw
     }

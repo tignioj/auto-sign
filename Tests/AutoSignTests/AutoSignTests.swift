@@ -154,3 +154,63 @@ import Testing
     #expect(status.nextAttempt(check: check, enabled: true, now: now).contains(now.addingTimeInterval(6 * 86_400).formatted(date: .abbreviated, time: .shortened)))
     #expect(RefreshStatusStore.failureSummary("error: No Accounts: Add a new account").contains("Xcode 未读取到可用账号"))
 }
+
+@Test func devicePreparationRetriesOnceAndCanRecover() async throws {
+    var attempts = 0
+    var waits = 0
+    try await DevicePreparationRetry.run {
+        attempts += 1
+        if attempts == 1 {
+            throw AutoSignError.command("The developer disk image could not be mounted on this device.")
+        }
+    } beforeRetry: { waits += 1 }
+    #expect(attempts == 2)
+    #expect(waits == 1)
+}
+
+@Test func devicePreparationStopsAfterSecondFailureAndKeepsDetails() async {
+    var attempts = 0
+    do {
+        try await DevicePreparationRetry.run {
+            attempts += 1
+            throw AutoSignError.command("Timed out waiting for all destinations matching the provided destination specifier to become available")
+        } beforeRetry: {}
+        Issue.record("Expected retry failure")
+    } catch {
+        #expect(error.localizedDescription.contains("已自动重试 1 次"))
+        #expect(error.localizedDescription.contains("Timed out waiting"))
+    }
+    #expect(attempts == 2)
+}
+
+@Test func devicePreparationDoesNotRetryAccountOrSigningErrors() async {
+    for message in ["No Accounts", "No signing certificate found", "Provisioning profile is invalid"] {
+        var attempts = 0
+        var waits = 0
+        do {
+            try await DevicePreparationRetry.run {
+                attempts += 1
+                throw AutoSignError.command(message)
+            } beforeRetry: { waits += 1 }
+            Issue.record("Expected original failure")
+        } catch {
+            #expect(error.localizedDescription == message)
+        }
+        #expect(attempts == 1)
+        #expect(waits == 0)
+    }
+}
+
+@Test func devicePreparationCancellationDuringWaitPreventsRetry() async {
+    var attempts = 0
+    do {
+        try await DevicePreparationRetry.run {
+            attempts += 1
+            throw AutoSignError.command("The developer disk image could not be mounted")
+        } beforeRetry: { throw CancellationError() }
+        Issue.record("Expected cancellation")
+    } catch {
+        #expect(error is CancellationError)
+    }
+    #expect(attempts == 1)
+}
