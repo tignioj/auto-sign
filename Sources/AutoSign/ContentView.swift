@@ -52,6 +52,10 @@ struct ContentView: View {
                 }
                 Text("时间为预计值；Mac 休眠、设备离线或 Apple 未发放新描述文件时会延后。设备到期时间仅在本工具确认安装成功后记录。")
                     .font(.caption).foregroundStyle(.secondary)
+                Label("掉签后重新安装：请到设备的“设置 → 通用 → VPN 与设备管理”中重新信任开发者证书；若已信任，无需重复操作。", systemImage: "checkmark.shield.fill")
+                    .font(.callout)
+                    .foregroundStyle(.orange)
+                    .fixedSize(horizontal: false, vertical: true)
                 if model.renewalStatuses.isEmpty {
                     Text("尚未选择自动续签设备").foregroundStyle(.secondary)
                 }
@@ -330,8 +334,8 @@ struct ContentView: View {
                 )
                 guideRow(
                     symbol: "checkmark.shield.fill",
-                    title: "首次打开 App：信任开发者",
-                    text: "首次安装完成后，请在 iPhone 或 iPad 上打开“设置 → 通用 → VPN 与设备管理”，在“开发者 App”下选择本次签名使用的开发者并点“信任”，然后再打开应用。每台设备通常只需操作一次；更换签名身份后可能需要重新信任。"
+                    title: "首次安装或掉签后：信任开发者证书",
+                    text: "首次安装或掉签后重新签名安装完成，请在 iPhone 或 iPad 上前往“设置 → 通用 → VPN 与设备管理”，在“开发者 App”下选择本次签名使用的开发者，按提示重新信任证书，再打开应用。若已显示信任，则无需重复操作。"
                 )
                 guideRow(
                     symbol: "person.crop.circle.badge.checkmark",
