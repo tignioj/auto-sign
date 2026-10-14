@@ -85,6 +85,7 @@ enum SigningService {
         }
         await statusChanged(refreshMessage)
         return try await generateProfile(for: device, bundleIdentifier: bundleID, seed: profile,
+                                        requireExtendedExpiry: forceRefresh,
                                         statusChanged: statusChanged)
     }
 
@@ -98,6 +99,7 @@ enum SigningService {
 
     private static func generateProfile(for device: AppleDevice, bundleIdentifier bundleID: String,
                                         seed profile: ProvisioningProfile,
+                                        requireExtendedExpiry: Bool = false,
                                         statusChanged: @escaping @MainActor @Sendable (String) -> Void) async throws -> URL {
         guard isValidBundleIdentifier(bundleID), !profile.teamIdentifier.isEmpty else {
             throw AutoSignError.invalidProfile("应用标识或签名团队无效。")
@@ -142,7 +144,8 @@ enum SigningService {
         }
         let renewed = try await readProfile(at: generated)
         try ProfileRenewalPolicy.validate(original: profile, renewed: renewed, bundleID: bundleID,
-                                           deviceUDID: device.udid, requestedAt: requestedAt)
+                                           deviceUDID: device.udid, requestedAt: requestedAt,
+                                           requireExtendedExpiry: requireExtendedExpiry)
         let profilesFolder = appSupport.appendingPathComponent("Profiles", isDirectory: true)
         try FileManager.default.createDirectory(at: profilesFolder, withIntermediateDirectories: true)
         let destination = profilesFolder.appendingPathComponent("\(bundleID).mobileprovision")
@@ -191,6 +194,7 @@ enum SigningService {
         expectedBundleIdentifier: String? = nil,
         installedBundleIdentifier: String? = nil,
         sourceURL: String? = nil,
+        verifyAfterInstall: Bool = false,
         stageChanged: @escaping @MainActor @Sendable (InstallStage, String) -> Void
     ) async throws -> URL {
         let operationLock = try SigningOperationLock()
@@ -295,10 +299,23 @@ enum SigningService {
             ["devicectl", "device", "install", "app", "--device", device.udid, app.path, "--timeout", "180"],
             context: "设备安装失败。"
         )
+        if verifyAfterInstall {
+            await stageChanged(.installing, "已安装，正在验证描述文件和应用启动…")
+            do { try await DeviceProfileService.verify(profileURL, on: device) }
+            catch ProfileRefreshError.unsupported {
+                // A system without a profile-reading API can still verify the
+                // signed package, successful Xcode install and application launch.
+                // A missing profile on a supported device must remain a failure.
+                await stageChanged(.installing, "设备不支持读回描述文件，正在验证已签名安装包的启动…")
+            }
+            try await DeviceAppVerification.verifyLaunch(mainBundleID, on: device)
+        }
         try StoreLibrary.recordInstall(ipa: ipa, profileURL: profileURL, identity: identity,
                                        device: device, bundle: app, expiration: profile.expirationDate,
                                        teamIdentifier: profile.teamIdentifier,
-                                       sourceBundleIdentifier: originalBundleID, sourceURL: sourceURL)
+                                       sourceBundleIdentifier: originalBundleID, sourceURL: sourceURL,
+                                       signedEntitlements: Data(contentsOf: entitlementsURL),
+                                       extensionBundleIdentifiers: try nestedBundles.map { try bundleIdentifier(at: $0) })
         return output
     }
 
@@ -365,7 +382,7 @@ enum SigningService {
         return url
     }
 
-    private static func expandWildcards(_ value: Any, bundleID: String) -> Any {
+    static func expandWildcards(_ value: Any, bundleID: String) -> Any {
         if let string = value as? String { return string.replacingOccurrences(of: "*", with: bundleID) }
         if let array = value as? [Any] { return array.map { expandWildcards($0, bundleID: bundleID) } }
         if let dictionary = value as? [String: Any] {

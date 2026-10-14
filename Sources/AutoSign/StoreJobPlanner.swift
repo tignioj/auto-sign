@@ -106,7 +106,7 @@ enum StoreJobPlanner {
             job.updatedAt = Date()
             for item in job.items.indices where !job.items[item].state.isTerminal {
                 job.items[item].state = .failed
-                job.items[item].message = "Mac 服务曾退出，请重新发起任务；到期时间以已确认安装记录为准。"
+                job.items[item].message = "Mac 服务曾退出，请重新发起任务；到期时间以已确认签名记录为准。"
             }
             return job
         }

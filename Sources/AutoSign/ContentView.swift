@@ -53,7 +53,7 @@ struct ContentView: View {
                     Text("当前描述文件到期：\(dateText(expiration)) · 续签窗口：\(dateText(expiration.addingTimeInterval(-86_400)))起")
                         .font(.caption).foregroundStyle(expiration < Date() ? .orange : .secondary)
                 }
-                Text("时间为预计值；Mac 休眠、设备离线或 Apple 未发放新描述文件时会延后。设备到期时间仅在本工具确认安装成功后记录。")
+                Text("时间为预计值；Mac 休眠、设备离线或 Apple 未发放新描述文件时会延后。设备到期时间仅在本工具确认签名更新成功后记录。")
                     .font(.caption).foregroundStyle(.secondary)
                 Label("掉签后重新安装：请到设备的“设置 → 通用 → VPN 与设备管理”中重新信任开发者证书；若已信任，无需重复操作。", systemImage: "checkmark.shield.fill")
                     .font(.callout)

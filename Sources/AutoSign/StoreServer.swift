@@ -139,7 +139,7 @@ final class StoreServer: ObservableObject {
         return StoreSnapshot(protocolVersion: 1, serverName: Host.current().localizedName ?? "AutoSign Mac",
             devices: devices.filter(\.isPaired).map {
                 StoreDevice(id: $0.udid, name: $0.name, model: $0.marketingName, isConnected: $0.isConnected, isReady: $0.isReadyForInstallation)
-            }, apps: records.map(\.app), recentJobs: jobs, capabilities: ["sources", "install", "updates"],
+            }, apps: records.map(\.app), recentJobs: jobs, capabilities: ["sources", "install", "updates", "profile-refresh"],
             availableUpdates: updates, sourceCheck: sourceLibrary.checkStatus)
     }
 
@@ -343,28 +343,11 @@ final class StoreServer: ObservableObject {
                 guard let device = available.first(where: { $0.udid == record.app.deviceUDID && $0.isReadyForInstallation }) else {
                     throw AutoSignError.command("设备不可用。请解锁设备，检查 Wi-Fi、USB 配对及开发者模式。")
                 }
-                let profileURL = try await SigningService.ensureUsableProfile(
-                    at: URL(fileURLWithPath: record.profilePath), for: device, forceRefresh: true,
-                    bundleIdentifier: record.app.bundleIdentifier
-                ) { [weak self] message in self?.updateProgress(jobID, index: index, message: message) }
-                let identities = try await SigningService.identities()
-                let profile = try await SigningService.readProfile(at: profileURL)
-                guard SigningService.profileSupports(profile.applicationIdentifier, bundleID: record.app.bundleIdentifier) else {
-                    throw AutoSignError.command("续期后的描述文件与原应用标识不匹配，已停止安装以保护原应用数据。")
+                let result = try await AppRefreshService.refresh(record, on: device) {
+                    [weak self] message in self?.updateProgress(jobID, index: index, message: message)
                 }
-                guard record.teamIdentifier == nil || record.teamIdentifier == profile.teamIdentifier else {
-                    throw AutoSignError.command("续期后的签名团队与原应用不一致，已停止覆盖安装。")
-                }
-                guard let identity = SigningService.identity(for: profile, available: identities, preferredID: record.identityID) else {
-                    throw AutoSignError.command("找不到此应用所属团队的签名证书，请在 Mac 检查 Xcode 账号。")
-                }
-                let output = try StoreLibrary.directory().appendingPathComponent("Packages/\(record.app.id)/signed.ipa")
-                _ = try await SigningService.signAndInstall(ipa: URL(fileURLWithPath: record.ipaPath),
-                    profileURL: profileURL, identity: identity, device: device, outputIPA: output
-                ) { [weak self] _, message in self?.updateProgress(jobID, index: index, message: message) }
                 try update(jobID, index: index, state: .completed,
-                    message: profile.timeToLiveDays == 7 ? "已重新签发 7 天签名并覆盖安装" : "已重新签发签名并覆盖安装",
-                    expiration: profile.expirationDate)
+                    message: result.message, expiration: result.expiration)
             } catch {
                 do { try update(jobID, index: index, state: .failed, message: error.localizedDescription) }
                 catch {

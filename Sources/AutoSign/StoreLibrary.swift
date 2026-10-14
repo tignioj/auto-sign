@@ -9,6 +9,8 @@ struct StoreRecord: Codable, Sendable {
     var teamIdentifier: String? = nil
     var sourceBundleIdentifier: String? = nil
     var sourceURL: String? = nil
+    var signedEntitlements: Data? = nil
+    var extensionBundleIdentifiers: [String]? = nil
 }
 
 /// Shared with the existing launchd process. The flock protects read/modify/write across processes.
@@ -28,7 +30,8 @@ enum StoreLibrary {
 
     static func recordInstall(ipa: URL, profileURL: URL, identity: SigningIdentity,
                               device: AppleDevice, bundle: URL, expiration: Date, teamIdentifier: String,
-                              sourceBundleIdentifier: String? = nil, sourceURL: String? = nil) throws {
+                              sourceBundleIdentifier: String? = nil, sourceURL: String? = nil,
+                              signedEntitlements: Data? = nil, extensionBundleIdentifiers: [String]? = nil) throws {
         let data = try Data(contentsOf: bundle.appendingPathComponent("Info.plist"))
         guard let info = try PropertyListSerialization.propertyList(from: data, format: nil) as? [String: Any],
               let bundleID = info["CFBundleIdentifier"] as? String else {
@@ -53,7 +56,28 @@ enum StoreLibrary {
             records.append(StoreRecord(app: app, ipaPath: savedIPA.path, profilePath: savedProfile.path,
                                        identityID: identity.id, teamIdentifier: teamIdentifier,
                                        sourceBundleIdentifier: sourceBundleIdentifier ?? existing?.sourceBundleIdentifier,
-                                       sourceURL: sourceURL ?? existing?.sourceURL))
+                                       sourceURL: sourceURL ?? existing?.sourceURL,
+                                       signedEntitlements: signedEntitlements,
+                                       extensionBundleIdentifiers: extensionBundleIdentifiers))
+            try StoreJSON.encoder().encode(records).write(to: try directory().appendingPathComponent("library.json"), options: .atomic)
+        }
+    }
+
+    static func recordProfileRefresh(_ previous: StoreRecord, profileURL: URL, expiration: Date) throws {
+        try withLock {
+            var records = try readUnlocked()
+            guard let index = records.firstIndex(where: { $0.app.id == previous.app.id }),
+                  records[index].app.refreshedAt == previous.app.refreshedAt,
+                  records[index].identityID == previous.identityID else {
+                throw AutoSignError.command("原应用记录已变化，请重新同步后再续签。")
+            }
+            let app = records[index].app
+            try copyIfDifferent(profileURL, to: URL(fileURLWithPath: records[index].profilePath))
+            records[index].app = StoreApp(id: app.id, deviceUDID: app.deviceUDID, name: app.name,
+                bundleIdentifier: app.bundleIdentifier, version: app.version, expiration: expiration,
+                refreshedAt: Date(), isStore: app.isStore, buildVersion: app.buildVersion)
+            records[index].signedEntitlements = previous.signedEntitlements
+            records[index].extensionBundleIdentifiers = previous.extensionBundleIdentifiers
             try StoreJSON.encoder().encode(records).write(to: try directory().appendingPathComponent("library.json"), options: .atomic)
         }
     }

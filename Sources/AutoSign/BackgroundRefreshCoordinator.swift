@@ -98,7 +98,7 @@ enum BackgroundRefreshCoordinator {
             }
 
             let renewedProfile = try await SigningService.readProfile(at: activeProfileURL)
-            let didRenew = oldProfile.isExpired || renewedProfile.expirationDate > oldProfile.expirationDate
+            let didRenew = renewedProfile.expirationDate > oldProfile.expirationDate
 
             // Never reinstall without a later expiry when handling a scheduled renewal.
             if renewalDue && !didRenew && pendingSet.isEmpty {
@@ -136,18 +136,32 @@ enum BackgroundRefreshCoordinator {
             var completedDevices: [AppleDevice] = []
             for (index, device) in devicesToInstall.enumerated() {
                 do {
-                    RefreshStatusStore.record(device.udid, name: device.name, state: "正在签名并安装")
+                    RefreshStatusStore.record(device.udid, name: device.name, state: "正在验证续签方式")
                     let output = backgroundFolder.appendingPathComponent("last-signed-\(device.udid).ipa")
-                    _ = try await SigningService.signAndInstall(
-                        ipa: URL(fileURLWithPath: ipaPath),
-                        profileURL: activeProfileURL,
-                        identity: identity,
-                        device: device,
-                        outputIPA: output
-                    ) { _, message in
-                        BackgroundRefreshManager.record("[\(index + 1)/\(devicesToInstall.count)] \(device.name)：\(message)")
+                    let record = try StoreLibrary.records().first {
+                        $0.app.deviceUDID == device.udid
+                            && $0.app.bundleIdentifier == SigningService.explicitBundleIdentifier(from: renewedProfile.applicationIdentifier)
                     }
-                    RefreshStatusStore.record(device.udid, name: device.name, state: "自动续签成功", expiration: renewedProfile.expirationDate, success: true)
+                    let completedMessage: String
+                    if let record {
+                        let result = try await AppRefreshService.apply(record, profileURL: activeProfileURL, on: device) { message in
+                            BackgroundRefreshManager.record("[\(index + 1)/\(devicesToInstall.count)] \(device.name)：\(message)")
+                        }
+                        completedMessage = result.message
+                    } else {
+                        _ = try await SigningService.signAndInstall(
+                            ipa: URL(fileURLWithPath: ipaPath),
+                            profileURL: activeProfileURL,
+                            identity: identity,
+                            device: device,
+                            outputIPA: output,
+                            verifyAfterInstall: true
+                        ) { _, message in
+                            BackgroundRefreshManager.record("[\(index + 1)/\(devicesToInstall.count)] \(device.name)：\(message)")
+                        }
+                        completedMessage = "已完整安装并验证应用启动"
+                    }
+                    RefreshStatusStore.record(device.udid, name: device.name, state: completedMessage, expiration: renewedProfile.expirationDate, success: true)
                     completedDevices.append(device)
                     remainingPending.remove(device.udid)
                 } catch {
@@ -160,7 +174,7 @@ enum BackgroundRefreshCoordinator {
             )
 
             let names = completedDevices.map(\.name).joined(separator: "、")
-            var status = "已通过 Wi‑Fi 自动续签并安装到 \(completedDevices.count) 台设备"
+            var status = "已通过 Wi‑Fi 自动续签并验证 \(completedDevices.count) 台设备"
             if !names.isEmpty { status += "：\(names)" }
             if unavailableCount > 0 { status += "；\(unavailableCount) 台未连接，稍后重试" }
             if developerModeDisabledCount > 0 { status += "；\(developerModeDisabledCount) 台未开启开发者模式" }

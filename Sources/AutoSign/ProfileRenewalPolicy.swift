@@ -5,7 +5,8 @@ enum ProfileRenewalPolicy {
     static let freshnessTolerance: TimeInterval = 5 * 60
 
     static func validate(original: ProvisioningProfile, renewed: ProvisioningProfile,
-                         bundleID: String, deviceUDID: String, requestedAt: Date, now: Date = Date()) throws {
+                         bundleID: String, deviceUDID: String, requestedAt: Date, now: Date = Date(),
+                         requireExtendedExpiry: Bool = false) throws {
         guard renewed.teamIdentifier == original.teamIdentifier,
               SigningService.profileSupports(renewed.applicationIdentifier, bundleID: bundleID) else {
             throw AutoSignError.invalidProfile("新描述文件的签名团队或应用标识不匹配，已停止覆盖安装。")
@@ -19,6 +20,10 @@ enum ProfileRenewalPolicy {
               created <= now.addingTimeInterval(120),
               renewed.expirationDate > now else {
             throw AutoSignError.invalidProfile("Apple 未签发新的描述文件，已停止安装并保留原签名。请检查 Xcode 账号后重试。")
+        }
+        if requireExtendedExpiry, SigningService.profileSupports(original.applicationIdentifier, bundleID: bundleID),
+           renewed.expirationDate <= original.expirationDate {
+            throw AutoSignError.invalidProfile("Apple 签发的描述文件没有延长有效期，已停止续签并保留原签名。")
         }
         if original.timeToLiveDays == 7 || renewed.timeToLiveDays == 7 {
             guard renewed.timeToLiveDays == 7,
