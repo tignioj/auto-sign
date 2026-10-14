@@ -79,7 +79,7 @@ struct InstallAppsView: View {
                 SourceLibraryView(library: sourceLibrary, model: model, searchText: $searchText, onManageSources: onManageSources)
                 if !model.selectedApps.isEmpty {
                     Divider()
-                    Text("本次操作的应用 · 可切换源继续添加")
+                    Text("本次操作的应用")
                         .font(.caption).foregroundStyle(.secondary)
                     ForEach(model.selectedApps) { selection in
                         HStack {

@@ -66,7 +66,6 @@ struct SourceManagementView: View {
                 }
                 Spacer()
                 Button("浏览应用") {
-                    library.selectedSourceID = source.id
                     onBrowseApps()
                 }
                 Button("移除", role: .destructive) {

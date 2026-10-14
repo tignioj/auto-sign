@@ -19,11 +19,8 @@ struct SourceLibraryView: View {
                 }
             } else {
                 HStack {
-                    Picker("应用源", selection: $library.selectedSourceID) {
-                        ForEach(library.sources) { source in
-                            Text("\(source.catalog.name)（\(source.catalog.apps.count) 个应用）").tag(Optional(source.id))
-                        }
-                    }
+                    Text("\(library.sources.count) 个源 · 共 \(library.sources.reduce(0) { $0 + $1.catalog.apps.count }) 个应用")
+                        .font(.callout).foregroundStyle(.secondary)
                     Spacer()
                     Button("刷新源") { Task { await library.refreshSources() } }
                     Button("管理源", action: onManageSources)
@@ -31,41 +28,66 @@ struct SourceLibraryView: View {
                 }
                 .disabled(library.isBusy || model.isBusy)
 
-                if let source = library.selectedSource {
-                    let apps = source.catalog.apps.filter {
-                        searchText.isEmpty || $0.name.localizedCaseInsensitiveContains(searchText)
-                            || $0.bundleIdentifier.localizedCaseInsensitiveContains(searchText)
+                HStack {
+                    TextField("搜索应用名称或 Bundle ID", text: $searchText).textFieldStyle(.roundedBorder)
+                    Button("全选当前列表", action: selectVisibleApps)
+                        .disabled(library.isBusy || model.isBusy || model.selectedDevice == nil
+                                  || !library.sources.contains { !filteredApps(in: $0).isEmpty })
+                }
+                if visibleSources.isEmpty {
+                    Text("没有匹配的应用").foregroundStyle(.secondary).padding(.vertical, 12)
+                } else {
+                    ForEach(visibleSources) { source in
+                        sourceSection(source)
                     }
-                    HStack {
-                        TextField("搜索应用名称或 Bundle ID", text: $searchText).textFieldStyle(.roundedBorder)
-                        Button("全选当前列表") {
-                            for app in apps where !model.isAppSelected(app, in: source)
-                                && (app.latestVersion != nil || model.managedApps[app.id] != nil) {
-                                model.toggleApp(app, in: source)
-                            }
-                        }
-                        .disabled(library.isBusy || model.isBusy || model.selectedDevice == nil || apps.isEmpty)
-                    }
-                    if let error = library.sourceErrors[source.id] {
-                        Text("刷新失败，当前显示上次缓存：\(error)").font(.caption).foregroundStyle(.orange)
-                    }
-                    if apps.isEmpty {
-                        Text(searchText.isEmpty ? "这个源暂时没有应用" : "没有匹配的应用")
-                            .foregroundStyle(.secondary).padding(.vertical, 12)
-                    } else {
-                        ScrollView {
-                            LazyVStack(spacing: 10) {
-                                ForEach(apps) { app in appRow(app, in: source) }
-                            }
-                        }
-                        .frame(height: min(380, CGFloat(apps.count) * 155))
-                    }
-                    Text("上次更新：\(source.updatedAt.formatted(date: .abbreviated, time: .shortened))")
-                        .font(.caption).foregroundStyle(.secondary)
                 }
             }
             if let error = library.errorMessage {
                 Text(error).font(.callout).foregroundStyle(.orange).textSelection(.enabled)
+            }
+        }
+    }
+
+    private var visibleSources: [SavedAppSource] {
+        library.sources.filter { searchText.isEmpty || !filteredApps(in: $0).isEmpty }
+    }
+
+    private func filteredApps(in source: SavedAppSource) -> [SourceApp] {
+        source.catalog.apps.filter {
+            searchText.isEmpty || $0.name.localizedCaseInsensitiveContains(searchText)
+                || $0.bundleIdentifier.localizedCaseInsensitiveContains(searchText)
+        }
+    }
+
+    private func sourceSection(_ source: SavedAppSource) -> some View {
+        let apps = filteredApps(in: source)
+        return VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Text(source.catalog.name).font(.callout.weight(.semibold))
+                Text("\(apps.count) 个应用").font(.caption).foregroundStyle(.secondary)
+                Spacer()
+            }
+            if let error = library.sourceErrors[source.id] {
+                Text("刷新失败，当前显示上次缓存：\(error)").font(.caption).foregroundStyle(.orange)
+            }
+            if apps.isEmpty {
+                Text("这个源暂时没有应用").foregroundStyle(.secondary).padding(.vertical, 12)
+            } else {
+                ForEach(apps) { app in appRow(app, in: source) }
+            }
+            Text("上次更新：\(source.updatedAt.formatted(date: .abbreviated, time: .shortened))")
+                .font(.caption).foregroundStyle(.secondary)
+        }
+    }
+
+    private func selectVisibleApps() {
+        var selectedIDs = Set(model.selectedApps.map(\.id))
+        for source in library.sources {
+            for app in filteredApps(in: source)
+                where app.latestVersion != nil || model.managedApps[app.id] != nil {
+                if selectedIDs.insert(app.id).inserted {
+                    model.toggleApp(app, in: source)
+                }
             }
         }
     }
