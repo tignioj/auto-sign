@@ -20,9 +20,10 @@ final class AppModel: ObservableObject {
     @Published private(set) var completedOutputURLs: [URL] = []
 
     @Published var accountStatus = AccountStatus()
-    @Published var renewalStatuses: [DeviceRefreshStatus] = []
+    @Published var renewalStatuses: [RefreshStatus] = []
+    @Published var appRenewalStatuses: [String: [AppRenewalStatus]] = [:]
+    @Published var renewalLibraryError: String?
     @Published var nextBackgroundCheck: Date?
-    @Published var profileExpiration: Date?
     @Published var schedulerStatus = "正在检查后台任务…"
 
     func refreshDashboard() async {
@@ -31,14 +32,27 @@ final class AppModel: ObservableObject {
         lastBackgroundStatus = BackgroundRefreshManager.lastStatus
         let preferences = UserDefaults.standard
         nextBackgroundCheck = (preferences.object(forKey: "backgroundCheckStarted") as? Date)?.addingTimeInterval(RefreshStatusStore.interval)
-        renewalStatuses = DeviceSelectionStore.load(from: preferences).map { udid in
-            var status = RefreshStatusStore.load(udid) ?? DeviceRefreshStatus(id: udid, name: udid)
+        let targets = DeviceSelectionStore.load(from: preferences)
+        do {
+            let records = try StoreLibrary.records().filter { targets.contains($0.app.deviceUDID) }
+            appRenewalStatuses = Dictionary(grouping: records, by: { $0.app.deviceUDID }).mapValues { records in
+                records.sorted { $0.app.expiration < $1.app.expiration }.map {
+                    AppRenewalStatus(app: $0.app, status: RefreshStatusStore.loadApp($0.app, preferences: preferences))
+                }
+            }
+            renewalLibraryError = nil
+        } catch {
+            appRenewalStatuses = [:]
+            renewalLibraryError = error.localizedDescription
+        }
+        renewalStatuses = targets.map { udid in
+            var status = RefreshStatusStore.load(udid) ?? RefreshStatus(id: udid, name: udid)
             if let device = devices.first(where: { $0.udid == udid }) { status.name = device.name }
+            let apps = appRenewalStatuses[udid] ?? []
+            status.expiration = apps.map(\.app.expiration).min()
+            status.nextEligible = status.expiration?.addingTimeInterval(-BackgroundRefreshCoordinator.renewalWindow)
             return status
         }
-        if let path = preferences.string(forKey: "profilePath") {
-            profileExpiration = (try? await SigningService.readProfile(at: URL(fileURLWithPath: path)))?.expirationDate
-        } else { profileExpiration = nil }
         if autoRefreshEnabled {
             let result = try? await ProcessRunner.run("/bin/launchctl", ["print", "gui/\(getuid())/\(BackgroundRefreshManager.label)"])
             schedulerStatus = result?.status == 0 ? "后台任务已加载 · 每 30 分钟检查" : "后台任务未加载，请关闭再开启自动续签"

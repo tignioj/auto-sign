@@ -55,12 +55,13 @@ struct ContentView: View {
                 Divider()
                 Text(model.schedulerStatus).font(.callout)
                 Text("下次后台检查：" + nextCheckText).font(.callout)
-                if let expiration = model.profileExpiration {
-                    Text("当前描述文件到期：\(dateText(expiration)) · 续签窗口：\(dateText(expiration.addingTimeInterval(-86_400)))起")
-                        .font(.caption).foregroundStyle(expiration < Date() ? .orange : .secondary)
-                }
-                Text("时间为预计值；Mac 休眠、设备离线或 Apple 未发放新描述文件时会延后。设备到期时间仅在本工具确认签名更新成功后记录。")
+                Text("自动续签覆盖已选设备的全部应用记录，每个应用在到期前 24 小时独立进入续签窗口。切换当前安装包不影响其他应用的续签。")
                     .font(.caption).foregroundStyle(.secondary)
+                Text("时间为预计值；Mac 休眠、设备离线或 Apple 未发放新描述文件时会延后。到期时间以本工具确认的安装或续签记录为准。")
+                    .font(.caption).foregroundStyle(.secondary)
+                if let error = model.renewalLibraryError {
+                    Text("无法读取应用续签记录：" + error).font(.caption).foregroundStyle(.orange)
+                }
                 Label("掉签后重新安装：请到设备的“设置 → 通用 → VPN 与设备管理”中重新信任开发者证书；若已信任，无需重复操作。", systemImage: "checkmark.shield.fill")
                     .font(.callout)
                     .foregroundStyle(.orange)
@@ -76,8 +77,14 @@ struct ContentView: View {
                             Text(status.state).foregroundStyle(status.failure == nil ? Color.cyan : Color.orange)
                         }
                         Text("最近记录：\(dateText(status.updatedAt))  ·  最近成功：\(dateText(status.lastSuccess))")
-                        Text("设备签名到期：\(dateText(status.expiration))")
-                        Text("下次续签：" + status.nextAttempt(check: model.nextBackgroundCheck, enabled: model.autoRefreshEnabled))
+                        if let apps = model.appRenewalStatuses[status.id], !apps.isEmpty {
+                            Text("\(apps.count) 个应用 · 最早到期：\(dateText(status.expiration))")
+                            ForEach(apps) { appStatus in
+                                appRenewalRow(appStatus)
+                            }
+                        } else if model.renewalLibraryError == nil {
+                            Text("暂无应用记录。通过 AutoSign 安装后将自动纳入续签。").foregroundStyle(.secondary)
+                        }
                         if let failure = status.failure {
                             Text("失败原因：" + RefreshStatusStore.failureSummary(failure)).foregroundStyle(.orange)
                             DisclosureGroup("完整错误详情") {
@@ -97,6 +104,29 @@ struct ContentView: View {
                 }
             }
         }
+    }
+
+    private func appRenewalRow(_ item: AppRenewalStatus) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack {
+                Text(item.app.name).fontWeight(.medium)
+                Spacer()
+                Text(item.status.state).foregroundStyle(item.status.failure == nil ? Color.cyan : Color.orange)
+            }
+            Text(item.app.bundleIdentifier).foregroundStyle(.secondary).textSelection(.enabled)
+            Text("签名到期：\(dateText(item.app.expiration)) · 续签窗口：\(dateText(item.status.nextEligible))起")
+            Text("下次续签：" + item.status.nextAttempt(check: model.nextBackgroundCheck, enabled: model.autoRefreshEnabled))
+            Text("最近成功：\(dateText(item.status.lastSuccess))").foregroundStyle(.secondary)
+            if let failure = item.status.failure {
+                Text("失败原因：" + RefreshStatusStore.failureSummary(failure)).foregroundStyle(.orange)
+                DisclosureGroup("完整错误详情") {
+                    Text(failure).font(.caption.monospaced()).textSelection(.enabled)
+                }
+            }
+        }
+        .padding(10)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(.white.opacity(0.025), in: RoundedRectangle(cornerRadius: 8))
     }
 
     private var nextCheckText: String {
@@ -344,7 +374,7 @@ struct ContentView: View {
                 Divider().opacity(0.35)
                 settingRow(title: "自动续签", symbol: "wifi") {
                     VStack(alignment: .trailing, spacing: 3) {
-                        Toggle("为已选设备后台自动续签", isOn: Binding(
+                        Toggle("为已选设备的全部应用自动续签", isOn: Binding(
                             get: { model.autoRefreshEnabled },
                             set: { model.setAutoRefreshEnabled($0) }
                         ))
@@ -408,7 +438,7 @@ struct ContentView: View {
                 }
                 .buttonStyle(.borderedProminent).tint(.cyan).disabled(!model.canInstall || sourceLibrary.isDownloading)
             }
-            Text("将使用同一份覆盖所有已选设备的描述文件逐台安装；后台续签也会保留这组设备。")
+            Text("本次将当前安装包逐台安装到已选设备；后台自动续签按这组设备的全部应用记录分别检查到期时间。")
                 .font(.caption2).foregroundStyle(.tertiary).frame(maxWidth: .infinity, alignment: .leading)
         }
         .padding(18).background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 16))

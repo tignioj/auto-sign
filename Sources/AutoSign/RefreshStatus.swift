@@ -1,6 +1,6 @@
 import Foundation
 
-struct DeviceRefreshStatus: Codable, Identifiable, Sendable {
+struct RefreshStatus: Codable, Identifiable, Sendable {
     var id: String
     var name: String
     var state: String = "尚无续签记录"
@@ -14,30 +14,72 @@ struct DeviceRefreshStatus: Codable, Identifiable, Sendable {
         guard enabled else { return "自动续签已关闭" }
         guard let check else { return "等待首次后台检查" }
         if check < now { return "检查时间已到，等待后台运行（Mac 需保持唤醒）" }
-        let window = nextEligible ?? expiration?.addingTimeInterval(-86_400)
+        let window = nextEligible ?? expiration?.addingTimeInterval(-BackgroundRefreshCoordinator.renewalWindow)
         let due = failure != nil ? check : max(check, window ?? check)
         return "预计 " + due.formatted(date: .abbreviated, time: .shortened)
     }
 }
 
+struct AppRenewalStatus: Identifiable, Sendable {
+    let app: StoreApp
+    let status: RefreshStatus
+    var id: String { app.id }
+}
+
 enum RefreshStatusStore {
     static let interval: TimeInterval = 1_800
-    static func load(_ udid: String, preferences: UserDefaults = .standard) -> DeviceRefreshStatus? {
-        guard let data = preferences.data(forKey: "deviceRefresh.\(udid)") else { return nil }
-        return try? JSONDecoder().decode(DeviceRefreshStatus.self, from: data)
+    static func load(_ udid: String, preferences: UserDefaults = .standard) -> RefreshStatus? {
+        loadValue(key: "deviceRefresh.\(udid)", preferences: preferences)
+    }
+
+    static func loadApp(_ app: StoreApp, preferences: UserDefaults = .standard) -> RefreshStatus {
+        var value = loadValue(key: "appRefresh.\(app.id)", preferences: preferences)
+            ?? RefreshStatus(id: app.id, name: app.name, state: "等待后台检查")
+        if let updated = value.updatedAt, app.refreshedAt > updated {
+            value.state = "应用记录已更新，等待后台检查"
+            value.failure = nil
+        }
+        value.name = app.name
+        value.expiration = app.expiration
+        value.nextEligible = app.expiration.addingTimeInterval(-BackgroundRefreshCoordinator.renewalWindow)
+        return value
+    }
+
+    static func recordApp(_ app: StoreApp, state: String, failure: String? = nil,
+                          expiration: Date? = nil, success: Bool = false, preferences: UserDefaults = .standard) {
+        var value = loadApp(app, preferences: preferences)
+        update(&value, state: state, failure: failure, expiration: expiration,
+               nextEligible: (expiration ?? app.expiration).addingTimeInterval(-BackgroundRefreshCoordinator.renewalWindow),
+               success: success)
+        save(value, key: "appRefresh.\(app.id)", preferences: preferences)
     }
 
     static func record(_ udid: String, name: String? = nil, state: String,
                        failure: String? = nil, expiration: Date? = nil,
                        nextEligible: Date? = nil, success: Bool = false, preferences: UserDefaults = .standard) {
-        var value = load(udid, preferences: preferences) ?? DeviceRefreshStatus(id: udid, name: name ?? udid)
+        var value = load(udid, preferences: preferences) ?? RefreshStatus(id: udid, name: name ?? udid)
         if let name { value.name = name }
+        update(&value, state: state, failure: failure, expiration: expiration, nextEligible: nextEligible, success: success)
+        save(value, key: "deviceRefresh.\(udid)", preferences: preferences)
+    }
+
+    private static func update(_ value: inout RefreshStatus, state: String, failure: String?, expiration: Date?,
+                               nextEligible: Date?, success: Bool) {
         value.state = state
         value.updatedAt = Date()
         value.failure = failure
         value.nextEligible = nextEligible
-        if success { value.lastSuccess = Date(); value.expiration = expiration }
-        if let data = try? JSONEncoder().encode(value) { preferences.set(data, forKey: "deviceRefresh.\(udid)") }
+        if success { value.lastSuccess = Date() }
+        if let expiration { value.expiration = expiration }
+    }
+
+    private static func loadValue(key: String, preferences: UserDefaults) -> RefreshStatus? {
+        guard let data = preferences.data(forKey: key) else { return nil }
+        return try? JSONDecoder().decode(RefreshStatus.self, from: data)
+    }
+
+    private static func save(_ value: RefreshStatus, key: String, preferences: UserDefaults) {
+        if let data = try? JSONEncoder().encode(value) { preferences.set(data, forKey: key) }
     }
 
     static func failureSummary(_ raw: String) -> String {

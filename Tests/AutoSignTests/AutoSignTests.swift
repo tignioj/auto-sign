@@ -148,7 +148,7 @@ import Testing
 @Test func scheduleDistinguishesDisabledOverdueAndRenewalWindow() {
     let now = Date(timeIntervalSince1970: 1_000_000)
     let check = now.addingTimeInterval(1_800)
-    let status = DeviceRefreshStatus(id: "one", name: "iPhone", expiration: now.addingTimeInterval(7 * 86_400))
+    let status = RefreshStatus(id: "one", name: "iPhone", expiration: now.addingTimeInterval(7 * 86_400))
     #expect(status.nextAttempt(check: check, enabled: false, now: now) == "自动续签已关闭")
     #expect(status.nextAttempt(check: nil, enabled: true, now: now) == "等待首次后台检查")
     #expect(status.nextAttempt(check: now.addingTimeInterval(-1), enabled: true, now: now).contains("检查时间已到"))
