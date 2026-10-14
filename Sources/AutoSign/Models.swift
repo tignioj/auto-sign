@@ -118,16 +118,16 @@ enum InstallStage: Equatable, Sendable {
     case preparing
     case signing
     case installing
-    case finished(URL)
+    case finished
     case failed(String)
 
     var title: String {
         switch self {
         case .idle: "准备就绪"
-        case .preparing: "正在检查文件…"
+        case .preparing: "正在处理应用…"
         case .signing: "正在签名…"
         case .installing: "正在安装到设备…"
-        case .finished: "签名并安装成功"
+        case .finished: "处理完成"
         case .failed: "操作未完成"
         }
     }

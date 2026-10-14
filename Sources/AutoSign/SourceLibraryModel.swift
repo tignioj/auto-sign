@@ -9,6 +9,7 @@ final class SourceLibraryModel: ObservableObject {
     @Published var selectedSourceID: String?
     @Published var sourceURLInput = ""
     @Published private(set) var isRefreshing = false
+    @Published private(set) var isPerformingDeviceOperation = false
     @Published private(set) var downloadingAppID: String?
     @Published private(set) var errorMessage: String?
     @Published private(set) var sourceErrors: [String: String] = [:] {
@@ -25,7 +26,7 @@ final class SourceLibraryModel: ObservableObject {
     private var downloadTask: Task<URL, Error>?
 
     var isDownloading: Bool { downloadingAppID != nil }
-    var isBusy: Bool { isRefreshing || isDownloading }
+    var isBusy: Bool { isRefreshing || isDownloading || isPerformingDeviceOperation }
     var selectedSource: SavedAppSource? { sources.first { $0.id == selectedSourceID } }
 
     init(preferences: UserDefaults = .standard, service: AppSourceService = AppSourceService()) {
@@ -39,8 +40,10 @@ final class SourceLibraryModel: ObservableObject {
     }
 
     /// Shared by the Mac UI and authenticated phone API.
-    func fetchAndSaveSource(_ input: String) async throws -> SavedAppSource {
-        guard !isBusy else { throw AppSourceError.invalid("正在更新源或下载，请稍后重试。") }
+    func fetchAndSaveSource(_ input: String, forDeviceOperation: Bool = false) async throws -> SavedAppSource {
+        guard !isRefreshing, !isDownloading, !isPerformingDeviceOperation || forDeviceOperation else {
+            throw AppSourceError.invalid("正在处理应用或更新源，请稍后重试。")
+        }
         isRefreshing = true
         defer { isRefreshing = false }
         let url = try AppSourceService.sourceURL(from: input)
@@ -186,4 +189,12 @@ final class SourceLibraryModel: ObservableObject {
     }
 
     func cancelDownload() { downloadTask?.cancel() }
+
+    func beginDeviceOperation() -> Bool {
+        guard !isBusy else { return false }
+        isPerformingDeviceOperation = true
+        return true
+    }
+
+    func endDeviceOperation() { isPerformingDeviceOperation = false }
 }

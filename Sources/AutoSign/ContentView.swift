@@ -2,8 +2,12 @@ import SwiftUI
 
 struct ContentView: View {
     @ObservedObject var model: AppModel
-    @StateObject private var sourceLibrary = SourceLibraryModel.shared
-    @State private var useSource = false
+    @ObservedObject private var sourceLibrary: SourceLibraryModel
+
+    init(model: AppModel) {
+        self.model = model
+        self.sourceLibrary = model.sourceLibrary
+    }
     @AppStorage(RefreshVerificationOptions.launchPreferenceKey) private var verifyLaunchAfterRefresh = false
 
     var body: some View {
@@ -17,13 +21,13 @@ struct ContentView: View {
             ScrollView {
                 VStack(spacing: 20) {
                     header
+                    deviceSection
+                    appsSection
+                    signingSection
+                    actionBar
                     renewalDashboard
                     StoreServerView()
-                    deviceSection
-                    ipaSection
-                    signingSection
                     provisioningGuide
-                    actionBar
                 }
                 .padding(30)
             }
@@ -55,7 +59,7 @@ struct ContentView: View {
                 Divider()
                 Text(model.schedulerStatus).font(.callout)
                 Text("下次后台检查：" + nextCheckText).font(.callout)
-                Text("自动续签覆盖已选设备的全部应用记录，每个应用在到期前 24 小时独立进入续签窗口。切换当前安装包不影响其他应用的续签。")
+                Text("成功安装的应用会按设备分别纳入自动续签，每个应用在到期前 24 小时独立进入续签窗口。切换当前设备或应用选择不影响已有续签记录。")
                     .font(.caption).foregroundStyle(.secondary)
                 Text("时间为预计值；Mac 休眠、设备离线或 Apple 未发放新描述文件时会延后。到期时间以本工具确认的安装或续签记录为准。")
                     .font(.caption).foregroundStyle(.secondary)
@@ -67,7 +71,7 @@ struct ContentView: View {
                     .foregroundStyle(.orange)
                     .fixedSize(horizontal: false, vertical: true)
                 if model.renewalStatuses.isEmpty {
-                    Text("尚未选择自动续签设备").foregroundStyle(.secondary)
+                    Text("暂无自动续签设备，请先安装应用").foregroundStyle(.secondary)
                 }
                 ForEach(model.renewalStatuses) { status in
                     VStack(alignment: .leading, spacing: 6) {
@@ -153,7 +157,7 @@ struct ContentView: View {
             VStack(alignment: .leading, spacing: 3) {
                 Text("AutoSign")
                     .font(.system(size: 28, weight: .bold, design: .rounded))
-                Text("给自己的 iPhone 与 iPad 安全重签名并安装 IPA")
+                Text("选择一台设备，批量安装和续签源中的应用")
                     .foregroundStyle(.secondary)
             }
             Spacer()
@@ -173,14 +177,14 @@ struct ContentView: View {
 
     private var statusColor: Color {
         switch model.stage {
-        case .failed: model.completedOutputURLs.isEmpty ? .red : .orange
+        case .failed: model.completedAppCount == 0 ? .red : .orange
         case .finished: .green
         default: .cyan
         }
     }
 
     private var deviceSection: some View {
-        card(title: "1  选择目标设备（可多选）", symbol: "cable.connector") {
+        card(title: "1  选择一台目标设备", symbol: "cable.connector") {
             VStack(spacing: 16) {
                 HStack {
                     Picker("设备类型", selection: Binding(get: { model.deviceKind }, set: { model.changeKind($0) })) {
@@ -190,18 +194,15 @@ struct ContentView: View {
                     }
                     .pickerStyle(.segmented)
                     .frame(maxWidth: 340)
+                    .disabled(model.isBusy)
                     Spacer()
-                    Text("已选 \(model.selectedDevices.count) 台")
+                    Text(model.selectedDevice.map { "当前设备：" + $0.name } ?? "请选择一台设备")
                         .font(.caption)
-                        .foregroundStyle(model.selectedDevices.isEmpty ? .orange : .secondary)
-                    Button(model.areAllReadyFilteredDevicesSelected ? "取消全选" : "全选可用设备") {
-                        model.toggleAllReadyFilteredDevices()
-                    }
-                    .disabled(!model.filteredDevices.contains(where: \.isReadyForInstallation))
+                        .foregroundStyle(model.selectedDevice == nil ? .orange : .secondary)
                     Button { Task { await model.refresh() } } label: {
                         Label("刷新", systemImage: "arrow.clockwise")
                     }
-                    .disabled(model.isRefreshing)
+                    .disabled(model.isRefreshing || model.isBusy)
                 }
 
                 if model.filteredDevices.isEmpty {
@@ -226,7 +227,7 @@ struct ContentView: View {
                                         }
                                         .buttonStyle(.borderedProminent)
                                         .tint(.indigo)
-                                        .disabled(model.pairingDeviceID != nil)
+                                        .disabled(model.isBusy)
                                     }
                                 }
                                 .frame(width: 250)
@@ -276,8 +277,8 @@ struct ContentView: View {
     }
 
     private func deviceCard(_ device: AppleDevice) -> some View {
-        let selected = model.selectedDeviceIDs.contains(device.id)
-        return Button { model.toggleDeviceSelection(device) } label: {
+        let selected = model.selectedDeviceID == device.id
+        return Button { model.selectDevice(device) } label: {
             HStack(spacing: 12) {
                 Image(systemName: device.kind.symbol)
                     .font(.system(size: 26)).foregroundStyle(selected ? .cyan : .secondary)
@@ -298,59 +299,46 @@ struct ContentView: View {
             .overlay(RoundedRectangle(cornerRadius: 13).stroke(selected ? Color.cyan.opacity(0.7) : Color.white.opacity(0.08)))
         }
         .buttonStyle(.plain)
+        .disabled(model.isBusy)
     }
 
-    private var ipaSection: some View {
-        card(title: "2  选择安装包", symbol: "shippingbox") {
-            VStack(alignment: .leading, spacing: 16) {
-                Picker("安装方式", selection: $useSource) {
-                    Text("本地 IPA").tag(false)
-                    Text("从源获取").tag(true)
-                }
-                .pickerStyle(.segmented)
-                .frame(maxWidth: 340)
-                .disabled(model.stage.isRunning || sourceLibrary.isDownloading)
-
-                if useSource {
-                    SourceLibraryView(library: sourceLibrary, installationBusy: model.stage.isRunning, selectIPA: model.acceptIPA)
-                    if let url = model.ipaURL {
-                        Label("当前安装包：\(url.lastPathComponent) · \(fileDescription(url))", systemImage: "shippingbox.fill")
-                            .font(.caption).foregroundStyle(.cyan).lineLimit(2)
+    private var appsSection: some View {
+        card(title: "2  选择源中的应用（可多选）", symbol: "square.stack.3d.up") {
+            VStack(alignment: .leading, spacing: 14) {
+                HStack {
+                    Label("已选 \(model.selectedApps.count) 个应用", systemImage: "checkmark.circle")
+                        .font(.callout.weight(.medium))
+                    Spacer()
+                    if !model.selectedApps.isEmpty {
+                        Button("清空选择") { model.clearAppSelection() }.disabled(model.isBusy)
                     }
-                } else {
-                    localIPAInput
                 }
-            }
-        }
-    }
-
-    private var localIPAInput: some View {
-        ZStack {
-            RoundedRectangle(cornerRadius: 15)
-                .fill(model.isDropTargeted ? Color.cyan.opacity(0.12) : Color.white.opacity(0.035))
-                .overlay(RoundedRectangle(cornerRadius: 15).stroke(style: StrokeStyle(lineWidth: 1.5, dash: [7]))
-                    .foregroundStyle(model.isDropTargeted ? Color.cyan : Color.white.opacity(0.18)))
-            HStack(spacing: 18) {
-                Image(systemName: model.ipaURL == nil ? "square.and.arrow.down" : "app.dashed")
-                    .font(.system(size: 34)).foregroundStyle(.cyan)
-                VStack(alignment: .leading, spacing: 5) {
-                    Text(model.ipaURL?.lastPathComponent ?? "把 .ipa 文件拖到这里")
-                        .font(.headline).lineLimit(1)
-                    Text(model.ipaURL == nil ? "也可以点击右侧按钮选择文件" : fileDescription(model.ipaURL!))
+                if model.selectedDevice == nil {
+                    Text("请先在上方选择一台设备，再勾选应用。")
+                        .font(.callout).foregroundStyle(.orange)
+                }
+                SourceLibraryView(library: sourceLibrary, model: model)
+                if !model.selectedApps.isEmpty {
+                    Divider()
+                    Text("本次操作的应用 · 可切换源继续添加")
                         .font(.caption).foregroundStyle(.secondary)
+                    ForEach(model.selectedApps) { selection in
+                        HStack {
+                            Text(selection.app.name).font(.callout)
+                            Text(sourceLibrary.sources.first { $0.id == selection.sourceURL }?.catalog.name ?? "源已移除")
+                                .font(.caption).foregroundStyle(.secondary)
+                            Spacer()
+                            Button { model.removeSelectedApp(selection.id) } label: {
+                                Image(systemName: "xmark.circle.fill")
+                            }
+                            .buttonStyle(.plain)
+                            .accessibilityLabel("取消选择 " + selection.app.name)
+                            .disabled(model.isBusy)
+                        }
+                    }
                 }
-                Spacer()
-                Button("选择 IPA") { model.chooseIPA() }.buttonStyle(.borderedProminent).tint(.indigo)
             }
-            .padding(22)
         }
-        .frame(height: 104)
-        .dropDestination(for: URL.self) { urls, _ in
-            guard !model.stage.isRunning, !sourceLibrary.isDownloading else { return false }
-            guard let first = urls.first else { return false }
-            model.acceptIPA(first); return true
-        } isTargeted: { model.isDropTargeted = $0 }
-        .disabled(model.stage.isRunning || sourceLibrary.isDownloading)
     }
 
     private var signingSection: some View {
@@ -367,14 +355,14 @@ struct ContentView: View {
                 }
                 Divider().opacity(0.35)
                 settingRow(title: "描述文件", symbol: "doc.badge.gearshape") {
-                    Text(model.profileURL?.lastPathComponent ?? "请选择匹配应用与设备的描述文件")
+                    Text(model.profileURL?.lastPathComponent ?? "首次安装请选择描述文件以确定签名团队")
                         .font(.callout).foregroundStyle(model.profileURL == nil ? .secondary : .primary).lineLimit(1)
                     Button("选择…") { model.chooseProfile() }
                 }
                 Divider().opacity(0.35)
                 settingRow(title: "自动续签", symbol: "wifi") {
                     VStack(alignment: .trailing, spacing: 3) {
-                        Toggle("为已选设备的全部应用自动续签", isOn: Binding(
+                        Toggle("为已安装的应用自动续签", isOn: Binding(
                             get: { model.autoRefreshEnabled },
                             set: { model.setAutoRefreshEnabled($0) }
                         ))
@@ -383,7 +371,10 @@ struct ContentView: View {
                             .font(.caption2).foregroundStyle(.secondary).lineLimit(1)
                     }
                 }
+                Text("首次安装使用所选描述文件的签名团队，为每个应用单独生成描述文件；续签使用各应用已保存的团队和证书。")
+                    .font(.caption).foregroundStyle(.secondary)
             }
+            .disabled(model.isBusy)
         }
     }
 
@@ -403,7 +394,7 @@ struct ContentView: View {
                 guideRow(
                     symbol: "person.crop.circle.badge.checkmark",
                     title: "免费 Apple ID / Personal Team",
-                    text: "若描述文件未包含某台已选设备，AutoSign 会请 Xcode 逐台注册并重建。请保持 Xcode 账号登录、Mac 联网，且所有设备均已解锁并信任此 Mac。免费签名通常有效 7 天。"
+                    text: "AutoSign 会请 Xcode 为所选设备注册应用并生成匹配的描述文件。请保持 Xcode 账号登录、Mac 联网，且设备已解锁并信任此 Mac。免费签名通常有效 7 天。"
                 )
                 guideRow(
                     symbol: "person.2.badge.gearshape",
@@ -420,26 +411,71 @@ struct ContentView: View {
     }
 
     private var actionBar: some View {
-        VStack(spacing: 12) {
-            HStack(spacing: 12) {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack(spacing: 10) {
                 Image(systemName: statusIcon).foregroundStyle(statusColor)
-                Text(model.detail).font(.callout).foregroundStyle(model.stage.isRunning ? .primary : .secondary).lineLimit(2)
+                Text(model.detail).font(.callout)
+                    .foregroundStyle(model.stage.isRunning ? .primary : .secondary)
+                    .fixedSize(horizontal: false, vertical: true)
                 Spacer()
-                if !model.completedOutputURLs.isEmpty {
-                    Button("在访达中显示") { model.revealOutputs() }
-                }
-                Button { model.install() } label: {
-                    HStack(spacing: 9) {
-                        if model.stage.isRunning { ProgressView().controlSize(.small) }
-                        else { Image(systemName: "arrow.down.app.fill") }
-                        Text(actionButtonTitle).fontWeight(.semibold)
-                    }
-                    .frame(minWidth: 170).padding(.vertical, 4)
-                }
-                .buttonStyle(.borderedProminent).tint(.cyan).disabled(!model.canInstall || sourceLibrary.isDownloading)
             }
-            Text("本次将当前安装包逐台安装到已选设备；后台自动续签按这组设备的全部应用记录分别检查到期时间。")
-                .font(.caption2).foregroundStyle(.tertiary).frame(maxWidth: .infinity, alignment: .leading)
+            HStack(spacing: 12) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(model.selectedDevice.map { "目标：" + $0.name } ?? "尚未选择设备")
+                        .font(.callout.weight(.semibold))
+                    Text("已选 \(model.selectedApps.count) 个应用")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+                Spacer()
+                Button { model.perform(.refresh) } label: {
+                    Label("续签所选应用", systemImage: "arrow.clockwise")
+                        .frame(minWidth: 120).padding(.vertical, 4)
+                }
+                .buttonStyle(.bordered).disabled(!model.canRefreshApps)
+                Button { model.perform(.install) } label: {
+                    Label("安装所选应用", systemImage: "arrow.down.app.fill")
+                        .frame(minWidth: 120).padding(.vertical, 4)
+                }
+                .buttonStyle(.borderedProminent).tint(.cyan).disabled(!model.canInstall)
+            }
+            if !model.selectedApps.isEmpty && !model.stage.isRunning {
+                if model.profileURL == nil && model.managedApps.isEmpty {
+                    Text("首次安装前，请在签名设置中选择描述文件。")
+                        .font(.caption).foregroundStyle(.orange)
+                }
+                let missing = model.selectedApps.filter { model.managedApps[$0.id] == nil }.count
+                if missing > 0 {
+                    Text("所选应用中有 \(missing) 个尚未在此设备安装；请先安装，或取消勾选这些应用后续签。")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+            }
+            Text("安装会获取源中的最新版本；续签使用这台设备已保存的版本。每个应用独立处理，结果显示在下方。")
+                .font(.caption).foregroundStyle(.secondary)
+            if !model.operationItems.isEmpty {
+                Divider()
+                ForEach(model.operationItems) { item in
+                    HStack(alignment: .top, spacing: 10) {
+                        if item.state == .running {
+                            ProgressView().controlSize(.small).frame(width: 18)
+                        } else {
+                            Image(systemName: item.state == .completed ? "checkmark.circle.fill"
+                                : item.state == .failed ? "exclamationmark.circle.fill" : "clock")
+                                .foregroundStyle(item.state == .completed ? Color.green
+                                    : item.state == .failed ? Color.orange : Color.secondary)
+                                .frame(width: 18)
+                        }
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(item.name).font(.callout.weight(.medium))
+                            Text(item.message).font(.caption).foregroundStyle(item.state == .failed ? .orange : .secondary)
+                                .textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
+                            if let expiration = item.expiration {
+                                Text("签名到期：" + dateText(expiration)).font(.caption).foregroundStyle(.secondary)
+                            }
+                        }
+                        Spacer()
+                    }
+                }
+            }
         }
         .padding(18).background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 16))
     }
@@ -451,12 +487,6 @@ struct ContentView: View {
         case .idle: "info.circle"
         default: "gearshape.2.fill"
         }
-    }
-
-    private var actionButtonTitle: String {
-        if model.stage.isRunning { return "处理中" }
-        let count = model.selectedDevices.count
-        return count > 1 ? "签名并安装到 \(count) 台" : "一键签名并安装"
     }
 
     private func card<Content: View>(title: String, symbol: String, @ViewBuilder content: () -> Content) -> some View {
@@ -497,8 +527,4 @@ struct ContentView: View {
         }
     }
 
-    private func fileDescription(_ url: URL) -> String {
-        let bytes = (try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0
-        return ByteCountFormatter.string(fromByteCount: Int64(bytes), countStyle: .file)
-    }
 }
