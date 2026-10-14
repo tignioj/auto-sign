@@ -47,7 +47,8 @@ enum StoreLibrary {
             let app = StoreApp(id: id, deviceUDID: device.udid,
                                name: info["CFBundleDisplayName"] as? String ?? info["CFBundleName"] as? String ?? bundleID,
                                bundleIdentifier: bundleID, version: info["CFBundleShortVersionString"] as? String ?? "1.0",
-                               expiration: expiration, refreshedAt: Date(), isStore: info["AutoSignStoreClient"] as? Bool == true)
+                               expiration: expiration, refreshedAt: Date(), isStore: info["AutoSignStoreClient"] as? Bool == true,
+                               buildVersion: info["CFBundleVersion"] as? String)
             records.removeAll { $0.app.id == id }
             records.append(StoreRecord(app: app, ipaPath: savedIPA.path, profilePath: savedProfile.path,
                                        identityID: identity.id, teamIdentifier: teamIdentifier,

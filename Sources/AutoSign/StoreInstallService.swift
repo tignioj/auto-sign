@@ -3,7 +3,7 @@ import CryptoKit
 
 @MainActor
 enum StoreInstallService {
-    static func install(_ input: StoreInstallRequest, version: SourceAppVersion, preferences: UserDefaults,
+    static func install(_ input: StoreInstallRequest, version: SourceAppVersion, preferences: UserDefaults, updating record: StoreRecord? = nil,
                         statusChanged: @escaping @MainActor @Sendable (String) -> Void) async throws -> Date {
         let available = try await DeviceService.connectedDevices()
         guard let device = available.first(where: { $0.udid == input.deviceUDID && $0.isReadyForInstallation }) else {
@@ -13,11 +13,20 @@ enum StoreInstallService {
         let directory = try BackgroundRefreshManager.applicationSupportURL().appendingPathComponent("Downloads", isDirectory: true)
         let ipa = try await AppSourceService().download(version, to: directory)
         defer { try? FileManager.default.removeItem(at: ipa.deletingLastPathComponent()) }
-        guard try await AppSourceService.packageBundleIdentifier(at: ipa) == input.bundleIdentifier else {
+        let metadata = try await AppSourceService.packageMetadata(at: ipa)
+        guard metadata.bundleIdentifier == input.bundleIdentifier else {
             throw AppSourceError.invalid("下载的 IPA 应用标识与源记录不一致，已停止安装。")
         }
+        try validateRelease(metadata, version: version)
         let records = try StoreLibrary.records().filter { $0.app.deviceUDID == device.udid }
-        let existing = await existingRecord(sourceID: input.bundleIdentifier, deviceUDID: input.deviceUDID, records: records)
+        let existing: StoreRecord?
+        if let record {
+            guard record.app.deviceUDID == input.deviceUDID,
+                  records.contains(where: { $0.app.id == record.app.id && $0.app.bundleIdentifier == record.app.bundleIdentifier }) else {
+                throw AutoSignError.command("原应用记录已变更，请重新同步后再更新。")
+            }
+            existing = record
+        } else { existing = await existingRecord(sourceID: input.bundleIdentifier, deviceUDID: input.deviceUDID, records: records) }
         let profileURL: URL
         if let existing { profileURL = URL(fileURLWithPath: existing.profilePath) }
         else if let path = preferences.string(forKey: "profilePath"), FileManager.default.fileExists(atPath: path) {
@@ -32,6 +41,9 @@ enum StoreInstallService {
         let targetID = existing?.app.bundleIdentifier ?? newBundleIdentifier(sourceID: input.bundleIdentifier, seed: seed)
         let renewedURL = try await SigningService.requestProfile(for: device, bundleIdentifier: targetID, seed: seed, statusChanged: statusChanged)
         let renewed = try await SigningService.readProfile(at: renewedURL)
+        guard renewed.teamIdentifier == seed.teamIdentifier else {
+            throw AutoSignError.invalidProfile("新描述文件的签名团队与原应用不一致，已停止覆盖安装。")
+        }
         let identities = try await SigningService.identities()
         guard let identity = SigningService.identity(for: renewed, available: identities,
                                                     preferredID: existing?.identityID ?? preferences.string(forKey: "identityID")) else {
@@ -43,6 +55,13 @@ enum StoreInstallService {
             installedBundleIdentifier: targetID, sourceURL: input.sourceURL
         ) { _, message in statusChanged(message) }
         return renewed.expirationDate
+    }
+
+    static func validateRelease(_ metadata: AppSourceService.PackageMetadata, version: SourceAppVersion) throws {
+        guard let actual = metadata.version, StoreUpdateDetector.compareVersions(actual, version.version) == .orderedSame,
+              version.buildVersion == nil || metadata.buildVersion == version.buildVersion else {
+            throw AppSourceError.invalid("下载的 IPA 实际版本与源发布版本不一致，已停止安装。请等待源修复后重试。")
+        }
     }
     /// Older manual installs may have a rewritten ID. Their original IPA still identifies the source app.
     static func existingRecord(sourceID: String, deviceUDID: String, records: [StoreRecord],

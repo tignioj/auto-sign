@@ -4,14 +4,21 @@ import Combine
 @MainActor
 final class SourceLibraryModel: ObservableObject {
     static let shared = SourceLibraryModel()
+    static let checkInterval: TimeInterval = 30 * 60
     @Published private(set) var sources: [SavedAppSource]
     @Published var selectedSourceID: String?
     @Published var sourceURLInput = ""
     @Published private(set) var isRefreshing = false
     @Published private(set) var downloadingAppID: String?
     @Published private(set) var errorMessage: String?
-    @Published private(set) var sourceErrors: [String: String] = [:]
+    @Published private(set) var sourceErrors: [String: String] = [:] {
+        didSet { preferences.set(sourceErrors, forKey: "sourceCheckErrors") }
+    }
     @Published private(set) var downloadMessage: String?
+    @Published var automaticChecks: Bool {
+        didSet { preferences.set(automaticChecks, forKey: "automaticSourceChecks") }
+    }
+    @Published private(set) var lastCheckedAt: Date?
 
     private let preferences: UserDefaults
     private let service: AppSourceService
@@ -24,6 +31,9 @@ final class SourceLibraryModel: ObservableObject {
     init(preferences: UserDefaults = .standard, service: AppSourceService = AppSourceService()) {
         self.preferences = preferences
         self.service = service
+        automaticChecks = preferences.object(forKey: "automaticSourceChecks") as? Bool ?? true
+        lastCheckedAt = preferences.object(forKey: "sourceCheckCompletedAt") as? Date
+        sourceErrors = preferences.dictionary(forKey: "sourceCheckErrors") as? [String: String] ?? [:]
         sources = AppSourceStore.load(from: preferences)
         selectedSourceID = sources.first?.id
     }
@@ -79,7 +89,20 @@ final class SourceLibraryModel: ObservableObject {
         } catch { errorMessage = error.localizedDescription }
     }
 
-    func refreshSources() async {
+    var checkStatus: SourceCheckStatus {
+        SourceCheckStatus(automatic: automaticChecks, interval: Self.checkInterval, checkedAt: lastCheckedAt,
+                          isChecking: isRefreshing, errors: sourceErrors)
+    }
+
+    @discardableResult
+    func checkSourcesIfDue(at now: Date = Date()) async -> Bool {
+        guard automaticChecks, !isBusy, !sources.isEmpty,
+              lastCheckedAt.map({ now.timeIntervalSince($0) >= Self.checkInterval }) ?? true else { return false }
+        await refreshSources(checkedAt: now)
+        return true
+    }
+
+    func refreshSources(checkedAt: Date = Date()) async {
         guard !isBusy, !sources.isEmpty else { return }
         isRefreshing = true
         errorMessage = nil
@@ -100,6 +123,10 @@ final class SourceLibraryModel: ObservableObject {
                 sourceErrors[source.id] = error.localizedDescription
                 if Task.isCancelled { break }
             }
+        }
+        if !Task.isCancelled {
+            lastCheckedAt = checkedAt
+            preferences.set(checkedAt, forKey: "sourceCheckCompletedAt")
         }
     }
 

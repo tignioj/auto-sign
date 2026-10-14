@@ -204,6 +204,16 @@ struct AppSourceService: Sendable {
 extension AppSourceService {
     /// Read the original identity before provisioning; source metadata alone cannot identify an IPA.
     static func packageBundleIdentifier(at url: URL) async throws -> String {
+        try await packageMetadata(at: url).bundleIdentifier
+    }
+
+    struct PackageMetadata: Sendable {
+        let bundleIdentifier: String
+        let version: String?
+        let buildVersion: String?
+    }
+
+    static func packageMetadata(at url: URL) async throws -> PackageMetadata {
         let listing = try await ProcessRunner.checked("/usr/bin/unzip", ["-Z1", url.path], context: "无法读取 IPA。")
         let paths = listing.output.split(separator: "\n").map(String.init).filter { path in
             let parts = path.split(separator: "/")
@@ -215,6 +225,7 @@ extension AppSourceService {
               let id = info["CFBundleIdentifier"] as? String, SigningService.isValidBundleIdentifier(id) else {
             throw AppSourceError.invalid("IPA 的应用标识无效。")
         }
-        return id
+        return PackageMetadata(bundleIdentifier: id, version: info["CFBundleShortVersionString"] as? String,
+                               buildVersion: info["CFBundleVersion"] as? String)
     }
 }

@@ -13,7 +13,7 @@ enum StoreJobPlanner {
             throw StoreHTTPError(status: 400, message: "请选择 1–50 个应用并提供唯一请求编号。")
         }
         if let existing = jobs.first(where: { $0.requestID == input.requestID }) {
-            guard existing.installRequest == nil, existing.deviceUDID == input.deviceUDID, Set(existing.items.map(\.id)) == Set(input.appIDs) else {
+            guard existing.installRequest == nil, existing.updateRequest == nil, existing.deviceUDID == input.deviceUDID, Set(existing.items.map(\.id)) == Set(input.appIDs) else {
                 throw StoreHTTPError(status: 409, message: "请求编号已用于其他任务。")
             }
             return StoreRefreshPlan(job: existing, records: [], isExisting: true)
@@ -45,6 +45,39 @@ enum StoreJobPlanner {
             return existing
         }
         return nil
+    }
+
+    static func existingUpdate(_ input: RefreshRequest, jobs: [RefreshJob]) throws -> RefreshJob? {
+        guard UUID(uuidString: input.requestID) != nil, !input.deviceUDID.isEmpty, !input.appIDs.isEmpty,
+              input.appIDs.count <= 50, Set(input.appIDs).count == input.appIDs.count else {
+            throw StoreHTTPError(status: 400, message: "请选择 1–50 个应用并提供唯一请求编号。")
+        }
+        guard let existing = jobs.first(where: { $0.requestID == input.requestID }) else { return nil }
+        guard let previous = existing.updateRequest, previous.deviceUDID == input.deviceUDID,
+              Set(previous.appIDs) == Set(input.appIDs) else {
+            throw StoreHTTPError(status: 409, message: "请求编号已用于其他任务。")
+        }
+        return existing
+    }
+
+    static func planUpdates(_ input: RefreshRequest, records: [StoreRecord], updates: [StoreAppUpdate],
+                            jobs: [RefreshJob], isBusy: Bool) throws -> StoreRefreshPlan {
+        if let existing = try existingUpdate(input, jobs: jobs) {
+            return StoreRefreshPlan(job: existing, records: [], isExisting: true)
+        }
+        guard !isBusy else { throw StoreHTTPError(status: 409, message: "Mac 正在处理应用任务，请等待当前任务结束。") }
+        let selected = try input.appIDs.map { id -> StoreRecord in
+            guard let record = records.first(where: { $0.app.id == id && $0.app.deviceUDID == input.deviceUDID }),
+                  updates.contains(where: { $0.id == id && $0.deviceUDID == input.deviceUDID }) else {
+                throw StoreHTTPError(status: 409, message: "应用已是最新版本或源已变更，请重新检查更新。")
+            }
+            return record
+        }
+        let ordered = selected.filter { !$0.app.isStore } + selected.filter { $0.app.isStore }
+        let job = RefreshJob(id: UUID().uuidString, requestID: input.requestID, deviceUDID: input.deviceUDID,
+            state: .queued, items: ordered.map { RefreshItem(id: $0.app.id, name: $0.app.name, state: .queued, message: "等待更新") },
+            createdAt: Date(), updatedAt: Date(), updateRequest: input)
+        return StoreRefreshPlan(job: job, records: ordered, isExisting: false)
     }
 
     static func planInstall(_ input: StoreInstallRequest, sources: [SavedAppSource], devices: [AppleDevice],

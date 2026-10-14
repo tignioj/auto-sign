@@ -2,6 +2,7 @@ import SwiftUI
 
 struct StoreServerView: View {
     @ObservedObject private var server = StoreServer.shared
+    @ObservedObject private var sources = SourceLibraryModel.shared
     @State private var showToken = false
 
     var body: some View {
@@ -15,6 +16,13 @@ struct StoreServerView: View {
             }
             Text(server.status).font(.callout).foregroundStyle(server.isEnabled ? .cyan : .secondary)
             if server.isEnabled {
+                Toggle("每 30 分钟自动检查源更新", isOn: $sources.automaticChecks).toggleStyle(.switch)
+                if let checked = sources.lastCheckedAt {
+                    Text("上次检查：\(checked.formatted(date: .abbreviated, time: .shortened))")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+                Text("手机 Store 会显示可更新版本并支持一键更新。Mac 休眠时暂停检查，唤醒后补查；请保持 AutoSign 运行。")
+                    .font(.caption).foregroundStyle(.secondary)
                 LabeledContent("连接地址") {
                     Text(server.address).textSelection(.enabled).font(.callout.monospaced())
                     Button("复制") { copy(server.address) }

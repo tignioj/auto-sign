@@ -16,6 +16,7 @@ final class StoreServer: ObservableObject {
     private var connections: [UUID: StoreHTTPConnection] = [:]
     private var jobs: [RefreshJob] = []
     private var worker: Task<Void, Never>?
+    private var sourceMonitor: Task<Void, Never>?
     private var devices: [AppleDevice] = []
     private var lastDeviceCheck = Date.distantPast
     private let devicesProvider: @Sendable () async throws -> [AppleDevice]
@@ -23,15 +24,18 @@ final class StoreServer: ObservableObject {
     private let installExecutor: (@MainActor @Sendable (StoreInstallRequest, SourceAppVersion, @escaping @MainActor @Sendable (String) -> Void) async throws -> Date)?
     private let preferences: UserDefaults
     private let jobsDirectory: URL?
+    private let recordsProvider: @MainActor () throws -> [StoreRecord]
 
     init(preferences: UserDefaults = .standard, jobsDirectory: URL? = nil, sourceLibrary: SourceLibraryModel? = nil,
          devicesProvider: @escaping @Sendable () async throws -> [AppleDevice] = { try await DeviceService.connectedDevices() },
-         installExecutor: (@MainActor @Sendable (StoreInstallRequest, SourceAppVersion, @escaping @MainActor @Sendable (String) -> Void) async throws -> Date)? = nil) {
+         installExecutor: (@MainActor @Sendable (StoreInstallRequest, SourceAppVersion, @escaping @MainActor @Sendable (String) -> Void) async throws -> Date)? = nil,
+         recordsProvider: @escaping @MainActor () throws -> [StoreRecord] = { try StoreLibrary.records() }) {
         self.sourceLibrary = sourceLibrary ?? SourceLibraryModel(preferences: preferences)
         self.installExecutor = installExecutor
         self.devicesProvider = devicesProvider
         self.preferences = preferences
         self.jobsDirectory = jobsDirectory
+        self.recordsProvider = recordsProvider
         isEnabled = preferences.bool(forKey: "storeServerEnabled")
         token = preferences.string(forKey: "storeServerToken") ?? ""
         do {
@@ -57,6 +61,7 @@ final class StoreServer: ObservableObject {
         preferences.set(enabled, forKey: "storeServerEnabled")
         if enabled { start() }
         else {
+            sourceMonitor?.cancel(); sourceMonitor = nil
             listener?.cancel(); listener = nil
             for connection in Array(connections.values) { connection.close() }
             status = "局域网服务已关闭"
@@ -91,6 +96,7 @@ final class StoreServer: ObservableObject {
                     case .failed(let error):
                         self.status = "局域网服务启动失败：\(error.localizedDescription)"
                         self.listener?.cancel(); self.listener = nil
+                        self.sourceMonitor?.cancel(); self.sourceMonitor = nil
                     default: break
                     }
                 }
@@ -101,7 +107,40 @@ final class StoreServer: ObservableObject {
             self.listener = listener
             status = "正在启动局域网服务…"
             listener.start(queue: .main)
+            startSourceMonitoring()
         } catch { status = "局域网服务启动失败：\(error.localizedDescription)" }
+    }
+
+    private func startSourceMonitoring() {
+        guard sourceMonitor == nil else { return }
+        sourceMonitor = Task { [weak self] in
+            while !Task.isCancelled {
+                guard let self, self.isEnabled else { return }
+                await self.checkSourcesIfDue()
+                do { try await Task.sleep(for: .seconds(60)) }
+                catch { return }
+            }
+        }
+    }
+
+    @discardableResult
+    func checkSourcesIfDue(at now: Date = Date()) async -> Bool {
+        guard !isBusy else { return false }
+        return await sourceLibrary.checkSourcesIfDue(at: now)
+    }
+
+    private func snapshot() async throws -> StoreSnapshot {
+        if Date().timeIntervalSince(lastDeviceCheck) > 10 {
+            devices = try await devicesProvider()
+            lastDeviceCheck = Date()
+        }
+        let records = try recordsProvider()
+        let updates = await StoreUpdateDetector.updates(records: records, sources: sourceLibrary.sources)
+        return StoreSnapshot(protocolVersion: 1, serverName: Host.current().localizedName ?? "AutoSign Mac",
+            devices: devices.filter(\.isPaired).map {
+                StoreDevice(id: $0.udid, name: $0.name, model: $0.marketingName, isConnected: $0.isConnected, isReady: $0.isReadyForInstallation)
+            }, apps: records.map(\.app), recentJobs: jobs, capabilities: ["sources", "install", "updates"],
+            availableUpdates: updates, sourceCheck: sourceLibrary.checkStatus)
     }
 
     private func accept(_ connection: NWConnection) {
@@ -119,15 +158,19 @@ final class StoreServer: ObservableObject {
         guard request.headers["authorization"] == "Bearer \(token)", !token.isEmpty else { return .error(401, "配对密钥无效。") }
         do {
             if request.method == "GET", request.path == "/v1/status" {
-                if Date().timeIntervalSince(lastDeviceCheck) > 10 {
-                    devices = try await devicesProvider()
-                    lastDeviceCheck = Date()
+                return try .json(await snapshot())
+            }
+            if request.method == "POST", request.path == "/v1/updates/check" {
+                guard !isBusy, !sourceLibrary.isBusy else { return .error(409, "Mac 正在处理应用任务，请稍后检查更新。") }
+                await sourceLibrary.refreshSources()
+                return try .json(await snapshot())
+            }
+            if request.method == "POST", request.path == "/v1/updates" {
+                guard request.headers["content-type"]?.lowercased().hasPrefix("application/json") == true else {
+                    return .error(415, "请使用 JSON 请求。")
                 }
-                let snapshot = StoreSnapshot(protocolVersion: 1, serverName: Host.current().localizedName ?? "AutoSign Mac",
-                    devices: devices.filter(\.isPaired).map {
-                        StoreDevice(id: $0.udid, name: $0.name, model: $0.marketingName, isConnected: $0.isConnected, isReady: $0.isReadyForInstallation)
-                    }, apps: try StoreLibrary.records().map(\.app), recentJobs: jobs, capabilities: ["sources", "install"])
-                return try .json(snapshot)
+                let input = try StoreJSON.decoder().decode(RefreshRequest.self, from: request.body)
+                return try .json(await submitUpdates(input), status: 202)
             }
             if request.method == "GET", request.path == "/v1/sources" {
                 return try .json(sourceLibrary.sources)
@@ -166,7 +209,7 @@ final class StoreServer: ObservableObject {
     }
 
     func submit(_ input: RefreshRequest) throws -> RefreshJob {
-        let plan = try StoreJobPlanner.plan(input, records: StoreLibrary.records(), jobs: jobs, isBusy: isBusy)
+        let plan = try StoreJobPlanner.plan(input, records: recordsProvider(), jobs: jobs, isBusy: isBusy)
         if plan.isExisting { return plan.job }
         let job = plan.job
         let previous = jobs
@@ -222,6 +265,72 @@ final class StoreServer: ObservableObject {
         } catch {
             do { try update(jobID, index: 0, state: .failed, message: error.localizedDescription) }
             catch { abortJob(jobID, message: "任务记录写入失败：\(error.localizedDescription)") }
+        }
+        lastDeviceCheck = .distantPast
+    }
+
+    func submitUpdates(_ input: RefreshRequest) async throws -> RefreshJob {
+        if let existing = try StoreJobPlanner.existingUpdate(input, jobs: jobs) { return existing }
+        guard !isBusy, !sourceLibrary.isBusy else { throw StoreHTTPError(status: 409, message: "Mac 正在处理应用任务，请稍后重试。") }
+        // Reserve the worker before device discovery or legacy IPA inspection can yield.
+        isBusy = true
+        do {
+            let available = try await devicesProvider()
+            guard available.contains(where: { $0.udid == input.deviceUDID && $0.isPaired && $0.isReadyForInstallation }) else {
+                throw StoreHTTPError(status: 400, message: "所选设备未配对或尚未就绪。")
+            }
+            let records = try recordsProvider()
+            let updates = await StoreUpdateDetector.updates(records: records, sources: sourceLibrary.sources)
+            let plan = try StoreJobPlanner.planUpdates(input, records: records, updates: updates, jobs: jobs, isBusy: false)
+            let previous = jobs
+            jobs.insert(plan.job, at: 0)
+            jobs = Array(jobs.prefix(30))
+            do { try persistJobs() } catch { jobs = previous; throw error }
+            worker = Task { [self] in
+                try? await Task.sleep(for: .seconds(2))
+                await executeUpdates(jobID: plan.job.id, records: plan.records, updates: updates)
+                isBusy = false
+                worker = nil
+            }
+            return plan.job
+        } catch { isBusy = false; throw error }
+    }
+
+    private func executeUpdates(jobID: String, records: [StoreRecord], updates: [StoreAppUpdate]) async {
+        for (index, planned) in records.enumerated() {
+            do {
+                guard let record = try recordsProvider().first(where: { $0.app.id == planned.app.id }),
+                      let target = updates.first(where: { $0.id == record.app.id }),
+                      sourceLibrary.sources.contains(where: { $0.id == target.sourceURL }) else {
+                    throw AutoSignError.command("应用记录或源已变更，请重新检查更新。")
+                }
+                try update(jobID, index: index, state: .running, message: "正在检查源中的最新版本…")
+                let source = try await sourceLibrary.fetchAndSaveSource(target.sourceURL)
+                guard let version = source.catalog.apps.first(where: { $0.id == target.bundleIdentifier })?.latestVersion else {
+                    throw AppSourceError.invalid("源中已没有这个应用的可下载版本。")
+                }
+                var installed = record.app
+                if installed.buildVersion == nil { installed.buildVersion = target.installedBuildVersion }
+                guard StoreUpdateDetector.isNewer(version, than: installed) else {
+                    try update(jobID, index: index, state: .completed, message: "已是最新版本，无需更新", expiration: record.app.expiration)
+                    continue
+                }
+                guard let requestID = jobs.first(where: { $0.id == jobID })?.requestID else {
+                    throw AutoSignError.command("更新任务记录丢失。")
+                }
+                let input = StoreInstallRequest(requestID: requestID,
+                    deviceUDID: record.app.deviceUDID, sourceURL: target.sourceURL, bundleIdentifier: target.bundleIdentifier)
+                let progress: @MainActor @Sendable (String) -> Void = { [weak self] message in
+                    self?.updateProgress(jobID, index: index, message: message)
+                }
+                let expiration: Date
+                if let installExecutor { expiration = try await installExecutor(input, version, progress) }
+                else { expiration = try await StoreInstallService.install(input, version: version, preferences: preferences, updating: record, statusChanged: progress) }
+                try update(jobID, index: index, state: .completed, message: "已更新至 \(version.displayVersion)", expiration: expiration)
+            } catch {
+                do { try update(jobID, index: index, state: .failed, message: error.localizedDescription) }
+                catch { abortJob(jobID, message: "任务记录写入失败：\(error.localizedDescription)"); return }
+            }
         }
         lastDeviceCheck = .distantPast
     }

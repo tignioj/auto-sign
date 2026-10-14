@@ -228,6 +228,7 @@ enum SigningService {
         }
 
         var mainBundleID = try bundleIdentifier(at: app)
+        let originalBundleID = mainBundleID
         if let expectedBundleIdentifier, mainBundleID != expectedBundleIdentifier {
             throw AutoSignError.invalidIPA("下载的 IPA 应用标识与源记录不一致，已停止安装。")
         }
@@ -297,7 +298,7 @@ enum SigningService {
         try StoreLibrary.recordInstall(ipa: ipa, profileURL: profileURL, identity: identity,
                                        device: device, bundle: app, expiration: profile.expirationDate,
                                        teamIdentifier: profile.teamIdentifier,
-                                       sourceBundleIdentifier: expectedBundleIdentifier, sourceURL: sourceURL)
+                                       sourceBundleIdentifier: originalBundleID, sourceURL: sourceURL)
         return output
     }
 
