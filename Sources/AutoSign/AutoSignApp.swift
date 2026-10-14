@@ -32,7 +32,7 @@ struct AutoSignApp: App {
             }
         }
         .windowStyle(.hiddenTitleBar)
-        .defaultSize(width: 940, height: 760)
+        .defaultSize(width: 1120, height: 820)
         .commands {
             CommandGroup(replacing: .newItem) {}
         }

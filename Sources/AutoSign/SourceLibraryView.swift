@@ -3,14 +3,20 @@ import SwiftUI
 struct SourceLibraryView: View {
     @ObservedObject var library: SourceLibraryModel
     @ObservedObject var model: AppModel
-    @State private var searchText = ""
+    @Binding var searchText: String
+    let onManageSources: () -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
             if library.sources.isEmpty {
-                sourceManagement
-                Text("添加一个源，即可为所选设备选择多个应用。源地址和应用列表会保存在本机。")
-                    .font(.callout).foregroundStyle(.secondary).padding(.vertical, 8)
+                ContentUnavailableView {
+                    Label("还没有应用源", systemImage: "square.stack.3d.up")
+                } description: {
+                    Text("添加一个应用源，即可浏览并安装其中的应用。")
+                } actions: {
+                    Button("添加应用源", action: onManageSources)
+                        .buttonStyle(.borderedProminent).tint(.cyan)
+                }
             } else {
                 HStack {
                     Picker("应用源", selection: $library.selectedSourceID) {
@@ -20,6 +26,7 @@ struct SourceLibraryView: View {
                     }
                     Spacer()
                     Button("刷新源") { Task { await library.refreshSources() } }
+                    Button("管理源", action: onManageSources)
                     if library.isRefreshing { ProgressView().controlSize(.small) }
                 }
                 .disabled(library.isBusy || model.isBusy)
@@ -56,53 +63,11 @@ struct SourceLibraryView: View {
                     Text("上次更新：\(source.updatedAt.formatted(date: .abbreviated, time: .shortened))")
                         .font(.caption).foregroundStyle(.secondary)
                 }
-                DisclosureGroup("管理应用源") { sourceManagement.padding(.top, 10) }
-                    .font(.callout)
             }
             if let error = library.errorMessage {
                 Text(error).font(.callout).foregroundStyle(.orange).textSelection(.enabled)
             }
         }
-        .task { await library.refreshSources() }
-        .onReceive(library.$sources) { _ in
-            // Reconcile after @Published has applied the new source list.
-            Task { model.reconcileSelectedApps() }
-        }
-    }
-
-    private var sourceManagement: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack {
-                TextField("AltStore / SideStore 源地址（JSON）", text: $library.sourceURLInput)
-                    .textFieldStyle(.roundedBorder)
-                    .onSubmit { addSource() }
-                Button("添加源") { addSource() }
-                    .disabled(library.sourceURLInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-            }
-            HStack {
-                Button("添加 AutoSign Store 源") {
-                    Task { await library.addSource(AppSourceService.autoSignStoreSourceURL) }
-                }
-                Button("添加 Kazumi 源") {
-                    Task { await library.addSource(AppSourceService.kazumiSourceURL) }
-                }
-                Spacer()
-                if !library.sources.isEmpty {
-                    Button("移除当前源", role: .destructive) { library.removeSelectedSource() }
-                }
-            }
-            if let source = library.selectedSource {
-                Text(source.url.absoluteString).textSelection(.enabled)
-                    .font(.caption).foregroundStyle(.secondary).lineLimit(2).truncationMode(.middle)
-            }
-        }
-        .disabled(library.isBusy || model.isBusy)
-    }
-
-    private func addSource() {
-        guard !library.isBusy, !model.isBusy else { return }
-        let input = library.sourceURLInput
-        Task { await library.addSource(input) }
     }
 
     private func appRow(_ app: SourceApp, in source: SavedAppSource) -> some View {

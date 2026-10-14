@@ -106,6 +106,6 @@ struct AccountStatus: Sendable {
         if accounts.isEmpty {
             return AccountStatus(title: "未检测到 Xcode 账号记录", detail: "自动续签可能受阻。请在 Xcode → Settings → Apple Accounts 检查或添加账号。")
         }
-        return AccountStatus(title: "检测到 \(accounts.count) 个 Xcode 账号记录", detail: "尚未验证在线登录有效性；实际续签结果见下方设备记录。")
+        return AccountStatus(title: "检测到 \(accounts.count) 个 Xcode 账号记录", detail: "尚未验证在线登录有效性；实际续签结果见“自动续签”页面的设备记录。")
     }
 }
