@@ -98,6 +98,7 @@ enum AppSourceError: LocalizedError {
 
 struct AppSourceService: Sendable {
     static let kazumiSourceURL = "https://raw.githubusercontent.com/ChouChiu/Kazumi-AltStore-Source/kazumi/generated/apps.json"
+    static let autoSignStoreSourceURL = "https://raw.githubusercontent.com/tignioj/auto-sign-store/source/apps.json"
     let session: URLSession
 
     init(session: URLSession = .shared) { self.session = session }

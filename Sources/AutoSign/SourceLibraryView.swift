@@ -17,6 +17,10 @@ struct SourceLibraryView: View {
             .disabled(library.isBusy || installationBusy)
 
             HStack {
+                Button("添加 AutoSign Store 源") {
+                    Task { await library.addSource(AppSourceService.autoSignStoreSourceURL) }
+                }
+                .disabled(library.isBusy || installationBusy)
                 Button("添加 Kazumi 源") {
                     Task { await library.addSource(AppSourceService.kazumiSourceURL) }
                 }

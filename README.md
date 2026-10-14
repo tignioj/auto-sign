@@ -48,6 +48,14 @@ Personal Team 免费签名通常只有 7 天有效期。手机 Store 手动刷�
 https://raw.githubusercontent.com/ChouChiu/Kazumi-AltStore-Source/kazumi/generated/apps.json
 ```
 
+安装手机续签客户端时，点击 **添加 AutoSign Store 源**，或手动添加以下固定地址：
+
+```text
+https://raw.githubusercontent.com/tignioj/auto-sign-store/source/apps.json
+```
+
+该源由 [auto-sign-store 的 GitHub Actions](https://github.com/tignioj/auto-sign-store/actions) 在正式版本标签发布后自动更新；IPA 托管在 GitHub Releases，无需本地构建 Store。
+
 选择已添加的源即可浏览应用、最新版本、包大小、iOS 版本要求和更新说明。点击 **下载最新 IPA** 后，AutoSign 会重新获取源中的最新发布，下载并检查 IPA，随后自动选为当前安装包。确认目标设备、签名证书和描述文件后，点击下方的签名安装按钮即可安装。
 
 源地址和上次获取的列表会保存在本机；再次进入“从源获取”或点击 **刷新源** 可检查更新。最新版本遵循 [AltStore 的版本顺序规则](https://faq.altstore.io/developers/updating-apps)，使用 `versions` 数组的第一项，也兼容旧源的顶层 `version` / `downloadURL` 字段。刷新失败时保留上次列表，下载前必须成功重新获取源。
@@ -70,7 +78,7 @@ Mac 需要保持开机、联网，所有目标设备与 Mac 必须位于同一�
 
 ## AutoSign Store 手机客户端
 
-相邻的 `auto-sign-store` 项目提供 iOS 17+ 原生客户端，可在手机查看签名到期时间、逐个 / 批量刷新应用，并刷新 Store 自身。先用 `auto-sign-store/Scripts/build-ipa.sh` 生成 Store IPA，再使用本版 AutoSign 签名安装。
+[auto-sign-store](https://github.com/tignioj/auto-sign-store) 提供 iOS 17+ 原生客户端，可在手机查看签名到期时间、逐个 / 批量刷新应用，并刷新 Store 自身。在“从源获取”中添加 AutoSign Store 源、下载最新 IPA，再使用 AutoSign 签名安装；也可以用相邻项目的 `Scripts/build-ipa.sh` 在本地构建。
 
 在本工具的 **AutoSign Store · 手机续签** 面板开启局域网服务。手机与 Mac 连接同一可信 Wi-Fi，在 Store 中发现 Mac 并输入面板中的配对密钥，核对并选择本机设备后即可发起刷新。服务监听端口 `8091`，通过 Bonjour `_autosign._tcp` 广播；Mac 必须保持运行，首次无线连接前仍需 USB 配对。
 
