@@ -104,7 +104,8 @@ import Testing
           let profilePath = environment["AUTOSIGN_INTEGRATION_PROFILE"] else { return }
     let devices = try await DeviceService.connectedDevices()
     let identities = try await SigningService.identities()
-    guard let device = devices.first(where: { $0.isConnected && $0.developerModeEnabled }),
+    let requestedUDID = environment["AUTOSIGN_INTEGRATION_DEVICE"]
+    guard let device = devices.first(where: { $0.isConnected && $0.developerModeEnabled && (requestedUDID == nil || $0.udid == requestedUDID) }),
           let identity = identities.first else {
         Issue.record("Integration signing requires one connected Developer Mode device and one signing identity")
         return

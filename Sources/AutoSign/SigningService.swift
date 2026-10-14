@@ -1,4 +1,5 @@
 import Foundation
+import CryptoKit
 
 enum SigningService {
     static func identities() async throws -> [SigningIdentity] {
@@ -34,22 +35,42 @@ enum SigningService {
             teamIdentifier: (raw["TeamIdentifier"] as? [String])?.first ?? String(appID.split(separator: ".").first ?? ""),
             provisionedDevices: Set(raw["ProvisionedDevices"] as? [String] ?? []),
             provisionsAllDevices: raw["ProvisionsAllDevices"] as? Bool ?? false,
-            entitlements: entitlements.mapValues(AnySendable.init)
+            entitlements: entitlements.mapValues(AnySendable.init),
+            signingCertificateHashes: Set((raw["DeveloperCertificates"] as? [Data] ?? []).map {
+                Insecure.SHA1.hash(data: $0).map { String(format: "%02X", $0) }.joined()
+            }),
+            creationDate: raw["CreationDate"] as? Date,
+            timeToLiveDays: raw["TimeToLive"] as? Int
         )
+    }
+
+    static func identity(for profile: ProvisioningProfile, available: [SigningIdentity], preferredID: String?) -> SigningIdentity? {
+        let matching = available.filter { identity in
+            if !profile.signingCertificateHashes.isEmpty {
+                return profile.signingCertificateHashes.contains(identity.hash.uppercased())
+            }
+            return identity.name.contains("(\(profile.teamIdentifier))")
+        }
+        return matching.first { $0.id == preferredID } ?? matching.first
     }
 
     static func ensureUsableProfile(
         at profileURL: URL,
         for device: AppleDevice,
         forceRefresh: Bool,
+        bundleIdentifier: String? = nil,
         statusChanged: @escaping @MainActor @Sendable (String) -> Void
     ) async throws -> URL {
+        let operationLock = try SigningOperationLock()
+        defer { withExtendedLifetime(operationLock) {} }
         let profile = try await readProfile(at: profileURL)
         let deviceMissing = !profile.provisionsAllDevices && !profile.provisionedDevices.contains(device.udid)
         guard profileNeedsRefresh(profile, for: device.udid, forceRefresh: forceRefresh) else {
             return profileURL
         }
-        guard let bundleID = explicitBundleIdentifier(from: profile.applicationIdentifier),
+        guard let bundleID = bundleIdentifier ?? explicitBundleIdentifier(from: profile.applicationIdentifier),
+              !bundleID.isEmpty, !bundleID.contains("*"),
+              profileSupports(profile.applicationIdentifier, bundleID: bundleID),
               !profile.teamIdentifier.isEmpty else {
             throw AutoSignError.invalidProfile("无法从旧描述文件读取续期所需的 Team ID 或 Bundle ID。")
         }
@@ -60,15 +81,23 @@ enum SigningService {
         } else if profile.isExpired {
             refreshMessage = "描述文件已过期，正在通过 Xcode 自动续期…"
         } else {
-            refreshMessage = "正在通过 Xcode 重新创建签名证书…"
+            refreshMessage = "正在请求 Apple 重新签发描述文件…"
         }
         await statusChanged(refreshMessage)
         let project = try provisioningHelperProjectURL()
         let appSupport = try FileManager.default.url(
             for: .applicationSupportDirectory, in: .userDomainMask, appropriateFor: nil, create: true
         ).appendingPathComponent("AutoSign", isDirectory: true)
-        let derivedData = appSupport.appendingPathComponent("ProvisioningDerivedData", isDirectory: true)
+        let cacheLease = try await ProvisioningProfileCache.isolate(
+            teamID: profile.teamIdentifier, bundleID: bundleID,
+            backupRoot: appSupport.appendingPathComponent("ProfileCacheBackups", isDirectory: true)
+        )
+        defer { try? cacheLease.rollback() }
+        // A new build directory also prevents reuse of an embedded profile from a previous helper build.
+        let derivedData = appSupport.appendingPathComponent("ProvisioningDerivedData/\(UUID().uuidString)", isDirectory: true)
         try FileManager.default.createDirectory(at: derivedData, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: derivedData) }
+        let requestedAt = Date()
 
         try await DevicePreparationRetry.run {
             _ = try await ProcessRunner.checked(
@@ -92,18 +121,14 @@ enum SigningService {
         guard FileManager.default.fileExists(atPath: generated.path) else {
             throw AutoSignError.invalidProfile("Xcode 已完成构建，但没有生成新的描述文件。")
         }
+        let renewed = try await readProfile(at: generated)
+        try ProfileRenewalPolicy.validate(original: profile, renewed: renewed, bundleID: bundleID,
+                                           deviceUDID: device.udid, requestedAt: requestedAt)
         let profilesFolder = appSupport.appendingPathComponent("Profiles", isDirectory: true)
         try FileManager.default.createDirectory(at: profilesFolder, withIntermediateDirectories: true)
         let destination = profilesFolder.appendingPathComponent("\(bundleID).mobileprovision")
         try FileManager.default.copyItemReplacing(generated, to: destination)
-        let renewed = try await readProfile(at: destination)
-        guard !renewed.isExpired else { throw AutoSignError.invalidProfile("Xcode 返回的描述文件仍处于过期状态。") }
-        guard renewed.provisionsAllDevices || renewed.provisionedDevices.contains(device.udid) else {
-            throw AutoSignError.invalidProfile(
-                "Xcode 已更新描述文件，但仍未包含设备 UDID（\(device.udid)）。"
-                + "请确认 Xcode 账号已登录、设备已解锁并信任此 Mac；付费开发者账号也可在 Apple Developer 后台注册该 UDID 后重新生成描述文件。"
-            )
-        }
+        try cacheLease.commit()
         return destination
     }
 
@@ -146,6 +171,8 @@ enum SigningService {
         outputIPA: URL? = nil,
         stageChanged: @escaping @MainActor @Sendable (InstallStage, String) -> Void
     ) async throws -> URL {
+        let operationLock = try SigningOperationLock()
+        defer { withExtendedLifetime(operationLock) {} }
         await stageChanged(.preparing, "正在解包并检查 IPA…")
         guard ipa.pathExtension.lowercased() == "ipa" else {
             throw AutoSignError.invalidIPA("请选择 `.ipa` 文件；iOS 应用安装包不是 `.ipk`。")
@@ -232,6 +259,9 @@ enum SigningService {
             ["devicectl", "device", "install", "app", "--device", device.udid, app.path, "--timeout", "180"],
             context: "设备安装失败。"
         )
+        try StoreLibrary.recordInstall(ipa: ipa, profileURL: profileURL, identity: identity,
+                                       device: device, bundle: app, expiration: profile.expirationDate,
+                                       teamIdentifier: profile.teamIdentifier)
         return output
     }
 

@@ -256,7 +256,8 @@ final class AppModel: ObservableObject {
 
             do {
                 identities = try await SigningService.identities()
-                guard let identity = identities.first(where: { $0.id == selectedIdentityID }) ?? identities.first else {
+                let activeProfileInfo = try await SigningService.readProfile(at: activeProfile)
+                guard let identity = SigningService.identity(for: activeProfileInfo, available: identities, preferredID: selectedIdentityID) else {
                     throw AutoSignError.missingSelection("Xcode 未能创建 Apple Development 签名证书。")
                 }
                 rememberIdentity(identity.id)

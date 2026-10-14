@@ -25,6 +25,7 @@ struct AutoSignApp: App {
             if launchMode == .interface {
                 ContentView(model: model)
                     .frame(minWidth: 860, minHeight: 680)
+                    .task { StoreServer.shared.startIfEnabled() }
             } else {
                 BackgroundTaskView(mode: launchMode)
                     .frame(width: 1, height: 1)

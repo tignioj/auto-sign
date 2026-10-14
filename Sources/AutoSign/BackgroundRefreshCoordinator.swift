@@ -1,8 +1,7 @@
 import Foundation
 
 enum BackgroundRefreshCoordinator {
-    /// Xcode Personal Team profiles cannot reliably be replaced before Apple considers them expired.
-    /// We probe during the last day, then launchd retries every 30 minutes at/after expiration.
+    /// Renew during the last day, invalidating only the matching Xcode cache to request a fresh profile.
     private static let renewalWindow: TimeInterval = 24 * 60 * 60
 
     static func run() async {
@@ -101,8 +100,7 @@ enum BackgroundRefreshCoordinator {
             let renewedProfile = try await SigningService.readProfile(at: activeProfileURL)
             let didRenew = oldProfile.isExpired || renewedProfile.expirationDate > oldProfile.expirationDate
 
-            // Before expiry Xcode may return the existing profile. Avoid a pointless reinstall;
-            // launchd will retry and obtain a new profile as soon as Apple expires the old one.
+            // Never reinstall without a later expiry when handling a scheduled renewal.
             if renewalDue && !didRenew && pendingSet.isEmpty {
                 for device in preparedDevices {
                     RefreshStatusStore.record(device.udid, name: device.name, state: "等待 Apple 发放新描述文件")
@@ -128,7 +126,8 @@ enum BackgroundRefreshCoordinator {
             }
 
             let identities = try await SigningService.identities()
-            guard let identity = identities.first else {
+            guard let identity = SigningService.identity(for: renewedProfile, available: identities,
+                                                         preferredID: preferences.string(forKey: "identityID")) else {
                 throw AutoSignError.missingSelection("续期后仍未找到 Apple Development 证书。")
             }
             preferences.set(identity.id, forKey: "identityID")

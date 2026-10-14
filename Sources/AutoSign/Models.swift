@@ -101,6 +101,9 @@ struct ProvisioningProfile: Sendable {
     let provisionedDevices: Set<String>
     let provisionsAllDevices: Bool
     let entitlements: [String: AnySendable]
+    var signingCertificateHashes: Set<String> = []
+    var creationDate: Date? = nil
+    var timeToLiveDays: Int? = nil
 
     var isExpired: Bool { expirationDate < Date() }
 }

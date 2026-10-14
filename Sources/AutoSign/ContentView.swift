@@ -2,6 +2,8 @@ import SwiftUI
 
 struct ContentView: View {
     @ObservedObject var model: AppModel
+    @StateObject private var sourceLibrary = SourceLibraryModel()
+    @State private var useSource = false
 
     var body: some View {
         ZStack {
@@ -15,6 +17,7 @@ struct ContentView: View {
                 VStack(spacing: 20) {
                     header
                     renewalDashboard
+                    StoreServerView()
                     deviceSection
                     ipaSection
                     signingSection
@@ -262,32 +265,56 @@ struct ContentView: View {
     }
 
     private var ipaSection: some View {
-        card(title: "2  拖入 IPA 安装包", symbol: "shippingbox") {
-            ZStack {
-                RoundedRectangle(cornerRadius: 15)
-                    .fill(model.isDropTargeted ? Color.cyan.opacity(0.12) : Color.white.opacity(0.035))
-                    .overlay(RoundedRectangle(cornerRadius: 15).stroke(style: StrokeStyle(lineWidth: 1.5, dash: [7]))
-                        .foregroundStyle(model.isDropTargeted ? Color.cyan : Color.white.opacity(0.18)))
-                HStack(spacing: 18) {
-                    Image(systemName: model.ipaURL == nil ? "square.and.arrow.down" : "app.dashed")
-                        .font(.system(size: 34)).foregroundStyle(.cyan)
-                    VStack(alignment: .leading, spacing: 5) {
-                        Text(model.ipaURL?.lastPathComponent ?? "把 .ipa 文件拖到这里")
-                            .font(.headline).lineLimit(1)
-                        Text(model.ipaURL == nil ? "也可以点击右侧按钮选择文件" : fileDescription(model.ipaURL!))
-                            .font(.caption).foregroundStyle(.secondary)
-                    }
-                    Spacer()
-                    Button("选择 IPA") { model.chooseIPA() }.buttonStyle(.borderedProminent).tint(.indigo)
+        card(title: "2  选择安装包", symbol: "shippingbox") {
+            VStack(alignment: .leading, spacing: 16) {
+                Picker("安装方式", selection: $useSource) {
+                    Text("本地 IPA").tag(false)
+                    Text("从源获取").tag(true)
                 }
-                .padding(22)
+                .pickerStyle(.segmented)
+                .frame(maxWidth: 340)
+                .disabled(model.stage.isRunning || sourceLibrary.isDownloading)
+
+                if useSource {
+                    SourceLibraryView(library: sourceLibrary, installationBusy: model.stage.isRunning, selectIPA: model.acceptIPA)
+                    if let url = model.ipaURL {
+                        Label("当前安装包：\(url.lastPathComponent) · \(fileDescription(url))", systemImage: "shippingbox.fill")
+                            .font(.caption).foregroundStyle(.cyan).lineLimit(2)
+                    }
+                } else {
+                    localIPAInput
+                }
             }
-            .frame(height: 104)
-            .dropDestination(for: URL.self) { urls, _ in
-                guard let first = urls.first else { return false }
-                model.acceptIPA(first); return true
-            } isTargeted: { model.isDropTargeted = $0 }
         }
+    }
+
+    private var localIPAInput: some View {
+        ZStack {
+            RoundedRectangle(cornerRadius: 15)
+                .fill(model.isDropTargeted ? Color.cyan.opacity(0.12) : Color.white.opacity(0.035))
+                .overlay(RoundedRectangle(cornerRadius: 15).stroke(style: StrokeStyle(lineWidth: 1.5, dash: [7]))
+                    .foregroundStyle(model.isDropTargeted ? Color.cyan : Color.white.opacity(0.18)))
+            HStack(spacing: 18) {
+                Image(systemName: model.ipaURL == nil ? "square.and.arrow.down" : "app.dashed")
+                    .font(.system(size: 34)).foregroundStyle(.cyan)
+                VStack(alignment: .leading, spacing: 5) {
+                    Text(model.ipaURL?.lastPathComponent ?? "把 .ipa 文件拖到这里")
+                        .font(.headline).lineLimit(1)
+                    Text(model.ipaURL == nil ? "也可以点击右侧按钮选择文件" : fileDescription(model.ipaURL!))
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+                Spacer()
+                Button("选择 IPA") { model.chooseIPA() }.buttonStyle(.borderedProminent).tint(.indigo)
+            }
+            .padding(22)
+        }
+        .frame(height: 104)
+        .dropDestination(for: URL.self) { urls, _ in
+            guard !model.stage.isRunning, !sourceLibrary.isDownloading else { return false }
+            guard let first = urls.first else { return false }
+            model.acceptIPA(first); return true
+        } isTargeted: { model.isDropTargeted = $0 }
+        .disabled(model.stage.isRunning || sourceLibrary.isDownloading)
     }
 
     private var signingSection: some View {
@@ -373,7 +400,7 @@ struct ContentView: View {
                     }
                     .frame(minWidth: 170).padding(.vertical, 4)
                 }
-                .buttonStyle(.borderedProminent).tint(.cyan).disabled(!model.canInstall)
+                .buttonStyle(.borderedProminent).tint(.cyan).disabled(!model.canInstall || sourceLibrary.isDownloading)
             }
             Text("将使用同一份覆盖所有已选设备的描述文件逐台安装；后台续签也会保留这组设备。")
                 .font(.caption2).foregroundStyle(.tertiary).frame(maxWidth: .infinity, alignment: .leading)
