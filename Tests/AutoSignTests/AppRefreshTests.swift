@@ -2,6 +2,62 @@ import Foundation
 import Testing
 @testable import AutoSign
 
+@Test func launchVerificationPreferenceDefaultsOffAndPersists() throws {
+    let suite = "AutoSignTests.RefreshVerification.\(UUID().uuidString)"
+    let preferences = try #require(UserDefaults(suiteName: suite))
+    defer { preferences.removePersistentDomain(forName: suite) }
+    #expect(!RefreshVerificationOptions.load(from: preferences).verifyLaunch)
+
+    preferences.set(true, forKey: RefreshVerificationOptions.launchPreferenceKey)
+    let reloaded = try #require(UserDefaults(suiteName: suite))
+    #expect(RefreshVerificationOptions.load(from: reloaded).verifyLaunch)
+    preferences.set(false, forKey: RefreshVerificationOptions.launchPreferenceKey)
+    #expect(!RefreshVerificationOptions.load(from: reloaded).verifyLaunch)
+}
+
+@Test(arguments: [false, true], [false, true])
+func renewalVerificationRespectsLaunchOption(verifyLaunch: Bool, reinstall: Bool) async throws {
+    let verification = RefreshVerificationOptions(verifyLaunch: verifyLaunch)
+    var events: [String] = []
+    let verify = {
+        try await verification.verify(profile: { events.append("profile-verified") },
+                                      launch: { events.append("launch") })
+    }
+    let result = try await AppRefreshService.perform(expiration: Date(),
+        incompatibility: reinstall ? "certificate changed" : nil, verification: verification, profileOnly: {
+            events.append("profile-installed")
+            try await verify()
+        }, reinstall: { _ in
+            events.append("reinstalled")
+            try await verify()
+        })
+    #expect(result.method == (reinstall ? .reinstalled : .profileOnly))
+    #expect(events == [reinstall ? "reinstalled" : "profile-installed", "profile-verified"] + (verifyLaunch ? ["launch"] : []))
+    #expect(result.message.contains(verifyLaunch ? "启动验证通过" : "已跳过启动验证"))
+    #expect(result.message.contains("启动验证通过") == verifyLaunch)
+}
+
+@Test(arguments: [false, true])
+func skippingLaunchStillRejectsUnverifiedProfiles(verifyLaunch: Bool) async {
+    var launched = false
+    await #expect(throws: ProfileRefreshError.self) {
+        try await RefreshVerificationOptions(verifyLaunch: verifyLaunch).verify(profile: {
+            throw ProfileRefreshError.verification("profile mismatch")
+        }, launch: { launched = true })
+    }
+    #expect(!launched)
+}
+
+@Test func enabledLaunchVerificationStillRejectsLaunchFailure() async {
+    var profileVerified = false
+    await #expect(throws: ProfileRefreshError.self) {
+        try await RefreshVerificationOptions(verifyLaunch: true).verify(profile: {
+            profileVerified = true
+        }, launch: { throw ProfileRefreshError.verification("app exited") })
+    }
+    #expect(profileVerified)
+}
+
 private func refreshProfile(uuid: String, expiry: Date, certificate: String = "CERT",
                             entitlements: [String: AnySendable] = ["application-identifier": AnySendable(value: "TEAM.app.test")]) -> ProvisioningProfile {
     ProvisioningProfile(name: "Test", uuid: uuid, expirationDate: expiry, applicationIdentifier: "TEAM.app.test",
@@ -69,7 +125,8 @@ private func refreshRecord(expiry: Date, extensions: [String] = [], entitlements
 
 @Test func successfulProfileUpdateNeverReinstalls() async throws {
     var events: [String] = []
-    let result = try await AppRefreshService.perform(expiration: Date(), incompatibility: nil, profileOnly: {
+    let result = try await AppRefreshService.perform(expiration: Date(), incompatibility: nil,
+        verification: .init(verifyLaunch: true), profileOnly: {
         events.append("profile-and-verify")
     }, reinstall: { _ in events.append("reinstall") })
     #expect(result.method == .profileOnly)
@@ -80,7 +137,8 @@ private func refreshRecord(expiry: Date, extensions: [String] = [], entitlements
 @Test func explicitCapabilityFailureFallsBackOnceButOfflineAndVerificationFailuresDoNot() async throws {
     var attempts = 0
     var replacements = 0
-    let result = try await AppRefreshService.perform(expiration: Date(), incompatibility: nil, profileOnly: {
+    let result = try await AppRefreshService.perform(expiration: Date(), incompatibility: nil,
+        verification: .init(verifyLaunch: true), profileOnly: {
         attempts += 1
         throw ProfileRefreshError.unsupported("unsupported service")
     }, reinstall: { _ in replacements += 1 })
@@ -90,6 +148,7 @@ private func refreshRecord(expiry: Date, extensions: [String] = [], entitlements
         var fallback = false
         do {
             _ = try await AppRefreshService.perform(expiration: Date(), incompatibility: nil,
+                verification: .init(verifyLaunch: true),
                 profileOnly: { throw error }, reinstall: { _ in fallback = true })
             Issue.record("Unverified refresh must fail")
         } catch { #expect(!fallback) }
@@ -100,7 +159,8 @@ private func refreshRecord(expiry: Date, extensions: [String] = [], entitlements
     var fastPath = false
     var replacements = 0
     do {
-        _ = try await AppRefreshService.perform(expiration: Date(), incompatibility: "certificate changed", profileOnly: {
+        _ = try await AppRefreshService.perform(expiration: Date(), incompatibility: "certificate changed",
+            verification: .init(verifyLaunch: true), profileOnly: {
             fastPath = true
         }, reinstall: { _ in replacements += 1; throw ProfileRefreshError.verification("app cannot start") })
         Issue.record("A failed replacement must not return success")
@@ -188,7 +248,8 @@ private func refreshRecord(expiry: Date, extensions: [String] = [], entitlements
     for record in records.sorted(by: { !$0.app.isStore && $1.app.isStore }) {
         let original = try await SigningService.readProfile(at: URL(fileURLWithPath: record.profilePath))
         let before = try #require(try await DeviceAppVerification.application(record.app.bundleIdentifier, on: device))
-        let result = try await AppRefreshService.refresh(record, on: device) { message in print(message) }
+        let result = try await AppRefreshService.refresh(record, on: device,
+            verification: .init(verifyLaunch: true)) { message in print(message) }
         #expect(result.method == .profileOnly)
         #expect(result.expiration > record.app.expiration)
         let after = try #require(try await DeviceAppVerification.application(record.app.bundleIdentifier, on: device))

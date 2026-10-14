@@ -343,7 +343,8 @@ final class StoreServer: ObservableObject {
                 guard let device = available.first(where: { $0.udid == record.app.deviceUDID && $0.isReadyForInstallation }) else {
                     throw AutoSignError.command("设备不可用。请解锁设备，检查 Wi-Fi、USB 配对及开发者模式。")
                 }
-                let result = try await AppRefreshService.refresh(record, on: device) {
+                let result = try await AppRefreshService.refresh(record, on: device,
+                    verification: .load(from: preferences)) {
                     [weak self] message in self?.updateProgress(jobID, index: index, message: message)
                 }
                 try update(jobID, index: index, state: .completed,

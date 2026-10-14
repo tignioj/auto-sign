@@ -4,6 +4,7 @@ struct ContentView: View {
     @ObservedObject var model: AppModel
     @StateObject private var sourceLibrary = SourceLibraryModel.shared
     @State private var useSource = false
+    @AppStorage(RefreshVerificationOptions.launchPreferenceKey) private var verifyLaunchAfterRefresh = false
 
     var body: some View {
         ZStack {
@@ -46,6 +47,11 @@ struct ContentView: View {
                     Button("刷新状态") { Task { await model.refreshDashboard() } }
                 }
                 Text(model.accountStatus.detail).font(.caption).foregroundStyle(.secondary)
+                Divider()
+                Toggle("刷新签名后验证应用启动", isOn: $verifyLaunchAfterRefresh)
+                    .toggleStyle(.switch)
+                Text("适用于手机发起的刷新和后台自动续签。关闭后不会自动启动应用，仍会校验描述文件和有效期；开启后会启动应用并检查进程。")
+                    .font(.caption).foregroundStyle(.secondary)
                 Divider()
                 Text(model.schedulerStatus).font(.callout)
                 Text("下次后台检查：" + nextCheckText).font(.callout)

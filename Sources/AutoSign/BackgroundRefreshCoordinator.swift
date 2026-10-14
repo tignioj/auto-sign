@@ -8,6 +8,7 @@ enum BackgroundRefreshCoordinator {
         UserDefaults.standard.set(Date(), forKey: "backgroundCheckStarted")
         do {
             let preferences = UserDefaults.standard
+            let verification = RefreshVerificationOptions.load(from: preferences)
             guard let ipaPath = preferences.string(forKey: "ipaPath"),
                   FileManager.default.fileExists(atPath: ipaPath) else {
                 for udid in DeviceSelectionStore.load(from: .standard) {
@@ -144,7 +145,7 @@ enum BackgroundRefreshCoordinator {
                     }
                     let completedMessage: String
                     if let record {
-                        let result = try await AppRefreshService.apply(record, profileURL: activeProfileURL, on: device) { message in
+                        let result = try await AppRefreshService.apply(record, profileURL: activeProfileURL, on: device, verification: verification) { message in
                             BackgroundRefreshManager.record("[\(index + 1)/\(devicesToInstall.count)] \(device.name)：\(message)")
                         }
                         completedMessage = result.message
@@ -155,11 +156,11 @@ enum BackgroundRefreshCoordinator {
                             identity: identity,
                             device: device,
                             outputIPA: output,
-                            verifyAfterInstall: true
+                            refreshVerification: verification
                         ) { _, message in
                             BackgroundRefreshManager.record("[\(index + 1)/\(devicesToInstall.count)] \(device.name)：\(message)")
                         }
-                        completedMessage = "已完整安装并验证应用启动"
+                        completedMessage = "已完整安装；\(verification.completionMessage)"
                     }
                     RefreshStatusStore.record(device.udid, name: device.name, state: completedMessage, expiration: renewedProfile.expirationDate, success: true)
                     completedDevices.append(device)

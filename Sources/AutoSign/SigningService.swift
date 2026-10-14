@@ -194,7 +194,7 @@ enum SigningService {
         expectedBundleIdentifier: String? = nil,
         installedBundleIdentifier: String? = nil,
         sourceURL: String? = nil,
-        verifyAfterInstall: Bool = false,
+        refreshVerification: RefreshVerificationOptions? = nil,
         stageChanged: @escaping @MainActor @Sendable (InstallStage, String) -> Void
     ) async throws -> URL {
         let operationLock = try SigningOperationLock()
@@ -299,16 +299,22 @@ enum SigningService {
             ["devicectl", "device", "install", "app", "--device", device.udid, app.path, "--timeout", "180"],
             context: "设备安装失败。"
         )
-        if verifyAfterInstall {
-            await stageChanged(.installing, "已安装，正在验证描述文件和应用启动…")
-            do { try await DeviceProfileService.verify(profileURL, on: device) }
-            catch ProfileRefreshError.unsupported {
-                // A system without a profile-reading API can still verify the
-                // signed package, successful Xcode install and application launch.
-                // A missing profile on a supported device must remain a failure.
-                await stageChanged(.installing, "设备不支持读回描述文件，正在验证已签名安装包的启动…")
-            }
-            try await DeviceAppVerification.verifyLaunch(mainBundleID, on: device)
+        if let verification = refreshVerification {
+            await stageChanged(.installing, verification.verifyLaunch
+                ? "已安装，正在验证描述文件和应用启动…" : "已安装，正在验证描述文件…")
+            try await verification.verify(profile: {
+                do { try await DeviceProfileService.verify(profileURL, on: device) }
+                catch ProfileRefreshError.unsupported {
+                    // Without profile read-back, rely on the validated signed
+                    // package and successful install, plus launch if enabled.
+                    // A missing profile on a supported device remains a failure.
+                    await stageChanged(.installing, verification.verifyLaunch
+                        ? "设备不支持读回描述文件，正在验证已签名安装包的启动…"
+                        : "设备不支持读回描述文件，已确认签名包与安装结果")
+                }
+            }, launch: {
+                try await DeviceAppVerification.verifyLaunch(mainBundleID, on: device)
+            })
         }
         try StoreLibrary.recordInstall(ipa: ipa, profileURL: profileURL, identity: identity,
                                        device: device, bundle: app, expiration: profile.expirationDate,

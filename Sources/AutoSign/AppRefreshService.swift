@@ -5,10 +5,11 @@ struct AppRefreshResult: Sendable {
     let method: Method
     let expiration: Date
     let fallbackReason: String?
+    let verification: RefreshVerificationOptions
 
     var message: String {
         let methodMessage = method == .profileOnly ? "已更新描述文件，无需重装" : "已重新签名并覆盖安装"
-        return "\(methodMessage)；有效期已延长，启动验证通过" + (fallbackReason.map { "（\($0)）" } ?? "")
+        return "\(methodMessage)；有效期已延长，\(verification.completionMessage)" + (fallbackReason.map { "（\($0)）" } ?? "")
     }
 }
 
@@ -52,21 +53,23 @@ enum ProfileRefreshCompatibility {
 
 enum AppRefreshService {
     static func refresh(_ record: StoreRecord, on device: AppleDevice,
+                        verification: RefreshVerificationOptions = .load(),
                         statusChanged: @escaping @MainActor @Sendable (String) -> Void) async throws -> AppRefreshResult {
         let profileURL = try await SigningService.ensureUsableProfile(
             at: URL(fileURLWithPath: record.profilePath), for: device, forceRefresh: true,
             bundleIdentifier: record.app.bundleIdentifier, statusChanged: statusChanged)
-        return try await apply(record, profileURL: profileURL, on: device, statusChanged: statusChanged)
+        return try await apply(record, profileURL: profileURL, on: device, verification: verification, statusChanged: statusChanged)
     }
 
     static func apply(_ record: StoreRecord, profileURL: URL, on device: AppleDevice,
+                      verification: RefreshVerificationOptions = .load(),
                       statusChanged: @escaping @MainActor @Sendable (String) -> Void) async throws -> AppRefreshResult {
         let original = try await SigningService.readProfile(at: URL(fileURLWithPath: record.profilePath))
         let renewed = try await SigningService.readProfile(at: profileURL)
         try validate(record: record, original: original, renewed: renewed, deviceUDID: device.udid)
         let signedRecord = try await signatureMetadata(record, original: original)
         let reason = ProfileRefreshCompatibility.reason(record: signedRecord, original: original, renewed: renewed)
-        return try await perform(expiration: renewed.expirationDate, incompatibility: reason, profileOnly: {
+        return try await perform(expiration: renewed.expirationDate, incompatibility: reason, verification: verification, profileOnly: {
             let lock = try SigningOperationLock()
             defer { withExtendedLifetime(lock) {} }
             guard let before = try await DeviceAppVerification.application(record.app.bundleIdentifier, on: device) else {
@@ -74,9 +77,13 @@ enum AppRefreshService {
             }
             await statusChanged("正在更新描述文件，无需重新安装应用…")
             try await DeviceProfileService.install(profileURL, on: device)
-            await statusChanged("正在从设备读回描述文件并验证应用启动…")
-            try await DeviceProfileService.verify(profileURL, on: device)
-            try await DeviceAppVerification.verifyLaunch(record.app.bundleIdentifier, on: device)
+            await statusChanged(verification.verifyLaunch
+                ? "正在从设备读回描述文件并验证应用启动…" : "正在从设备读回并校验描述文件…")
+            try await verification.verify(profile: {
+                try await DeviceProfileService.verify(profileURL, on: device)
+            }, launch: {
+                try await DeviceAppVerification.verifyLaunch(record.app.bundleIdentifier, on: device)
+            })
             guard try await DeviceAppVerification.application(record.app.bundleIdentifier, on: device) == before else {
                 throw ProfileRefreshError.verification("验证期间设备上的应用已变化，无法确认本次续签结果。")
             }
@@ -90,7 +97,7 @@ enum AppRefreshService {
             let output = try StoreLibrary.directory().appendingPathComponent("Packages/\(record.app.id)/signed.ipa")
             _ = try await SigningService.signAndInstall(ipa: URL(fileURLWithPath: record.ipaPath),
                 profileURL: profileURL, identity: identity, device: device, outputIPA: output,
-                installedBundleIdentifier: record.app.bundleIdentifier, verifyAfterInstall: true
+                installedBundleIdentifier: record.app.bundleIdentifier, refreshVerification: verification
             ) { _, message in statusChanged(message) }
         })
     }
@@ -132,6 +139,7 @@ enum AppRefreshService {
     // Only a capability/signature incompatibility permits replacement. Offline,
     // locked, cancelled or unverified requests never silently trigger a reinstall.
     static func perform(expiration: Date, incompatibility: String?,
+                        verification: RefreshVerificationOptions,
                         profileOnly: () async throws -> Void,
                         reinstall: (String) async throws -> Void) async throws -> AppRefreshResult {
         try Task.checkCancellation()
@@ -139,13 +147,13 @@ enum AppRefreshService {
         if reason == nil {
             do {
                 try await profileOnly()
-                return AppRefreshResult(method: .profileOnly, expiration: expiration, fallbackReason: nil)
+                return AppRefreshResult(method: .profileOnly, expiration: expiration, fallbackReason: nil, verification: verification)
             } catch ProfileRefreshError.incompatible(let message) { reason = message }
               catch ProfileRefreshError.unsupported(let message) { reason = message }
         }
         try Task.checkCancellation()
         let fallbackReason = reason ?? "设备不支持单独刷新描述文件"
         try await reinstall(fallbackReason)
-        return AppRefreshResult(method: .reinstalled, expiration: expiration, fallbackReason: fallbackReason)
+        return AppRefreshResult(method: .reinstalled, expiration: expiration, fallbackReason: fallbackReason, verification: verification)
     }
 }
