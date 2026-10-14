@@ -9,11 +9,11 @@
     <key>CFBundleInfoDictionaryVersion</key><string>6.0</string>
     <key>CFBundleName</key><string>AutoSign</string>
     <key>CFBundlePackageType</key><string>APPL</string>
-    <key>CFBundleShortVersionString</key><string>1.2.1</string>
-    <key>CFBundleVersion</key><string>4</string>
+    <key>CFBundleShortVersionString</key><string>1.3.0</string>
+    <key>CFBundleVersion</key><string>5</string>
     <key>LSMinimumSystemVersion</key><string>14.0</string>
     <key>NSHighResolutionCapable</key><true/>
-    <key>NSLocalNetworkUsageDescription</key><string>让 AutoSign Store 在同一 Wi-Fi 中发现此 Mac 并请求续签。</string>
+    <key>NSLocalNetworkUsageDescription</key><string>让 AutoSign Store 在同一 Wi-Fi 中发现此 Mac 并请求安装应用及刷新签名。</string>
     <key>NSBonjourServices</key><array><string>_autosign._tcp</string></array>
 </dict>
 </plist>

@@ -13,12 +13,12 @@ enum StoreJobPlanner {
             throw StoreHTTPError(status: 400, message: "请选择 1–50 个应用并提供唯一请求编号。")
         }
         if let existing = jobs.first(where: { $0.requestID == input.requestID }) {
-            guard existing.deviceUDID == input.deviceUDID, Set(existing.items.map(\.id)) == Set(input.appIDs) else {
+            guard existing.installRequest == nil, existing.deviceUDID == input.deviceUDID, Set(existing.items.map(\.id)) == Set(input.appIDs) else {
                 throw StoreHTTPError(status: 409, message: "请求编号已用于其他任务。")
             }
             return StoreRefreshPlan(job: existing, records: [], isExisting: true)
         }
-        guard !isBusy else { throw StoreHTTPError(status: 409, message: "Mac 正在刷新应用，请等待当前任务结束。") }
+        guard !isBusy else { throw StoreHTTPError(status: 409, message: "Mac 正在处理应用任务，请等待当前任务结束。") }
         let selected = try input.appIDs.map { id -> StoreRecord in
             guard let record = records.first(where: { $0.app.id == id && $0.app.deviceUDID == input.deviceUDID }) else {
                 throw StoreHTTPError(status: 404, message: "应用不属于所选设备，请重新同步。")
@@ -33,6 +33,38 @@ enum StoreJobPlanner {
         return StoreRefreshPlan(job: job, records: ordered, isExisting: false)
     }
 
+    static func existingInstall(_ input: StoreInstallRequest, jobs: [RefreshJob]) throws -> RefreshJob? {
+        guard UUID(uuidString: input.requestID) != nil, !input.deviceUDID.isEmpty,
+              SigningService.isValidBundleIdentifier(input.bundleIdentifier) else {
+            throw StoreHTTPError(status: 400, message: "安装参数或请求编号无效。")
+        }
+        if let existing = jobs.first(where: { $0.requestID == input.requestID }) {
+            guard existing.installRequest == input else {
+                throw StoreHTTPError(status: 409, message: "请求编号已用于其他任务。")
+            }
+            return existing
+        }
+        return nil
+    }
+
+    static func planInstall(_ input: StoreInstallRequest, sources: [SavedAppSource], devices: [AppleDevice],
+                            jobs: [RefreshJob], isBusy: Bool) throws -> RefreshJob {
+        if let existing = try existingInstall(input, jobs: jobs) { return existing }
+        guard !isBusy else { throw StoreHTTPError(status: 409, message: "Mac 正在处理应用任务，请等待当前任务结束。") }
+        let url = try AppSourceService.sourceURL(from: input.sourceURL)
+        guard url.absoluteString == input.sourceURL,
+              let source = sources.first(where: { $0.url == url }),
+              let app = source.catalog.apps.first(where: { $0.id == input.bundleIdentifier }), app.latestVersion != nil else {
+            throw StoreHTTPError(status: 404, message: "请先添加或刷新源，再选择可下载的应用。")
+        }
+        guard devices.contains(where: { $0.udid == input.deviceUDID && $0.isPaired && $0.isReadyForInstallation }) else {
+            throw StoreHTTPError(status: 400, message: "所选设备未配对或尚未就绪。")
+        }
+        return RefreshJob(id: UUID().uuidString, requestID: input.requestID, deviceUDID: input.deviceUDID,
+            state: .queued, items: [RefreshItem(id: app.id, name: app.name, state: .queued, message: "等待下载并安装")],
+            createdAt: Date(), updatedAt: Date(), installRequest: input)
+    }
+
     static func recoverInterrupted(_ jobs: [RefreshJob]) -> [RefreshJob] {
         jobs.map { original in
             guard !original.state.isTerminal else { return original }
@@ -41,7 +73,7 @@ enum StoreJobPlanner {
             job.updatedAt = Date()
             for item in job.items.indices where !job.items[item].state.isTerminal {
                 job.items[item].state = .failed
-                job.items[item].message = "Mac 服务曾退出，请重新发起刷新；到期时间以已确认安装记录为准。"
+                job.items[item].message = "Mac 服务曾退出，请重新发起任务；到期时间以已确认安装记录为准。"
             }
             return job
         }

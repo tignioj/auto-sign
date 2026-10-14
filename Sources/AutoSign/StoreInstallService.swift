@@ -1,0 +1,66 @@
+import Foundation
+import CryptoKit
+
+@MainActor
+enum StoreInstallService {
+    static func install(_ input: StoreInstallRequest, version: SourceAppVersion, preferences: UserDefaults,
+                        statusChanged: @escaping @MainActor @Sendable (String) -> Void) async throws -> Date {
+        let available = try await DeviceService.connectedDevices()
+        guard let device = available.first(where: { $0.udid == input.deviceUDID && $0.isReadyForInstallation }) else {
+            throw AutoSignError.command("设备不可用。请解锁设备，检查 Wi-Fi、USB 配对及开发者模式。")
+        }
+        statusChanged("正在下载 IPA \(version.displayVersion)…")
+        let directory = try BackgroundRefreshManager.applicationSupportURL().appendingPathComponent("Downloads", isDirectory: true)
+        let ipa = try await AppSourceService().download(version, to: directory)
+        defer { try? FileManager.default.removeItem(at: ipa.deletingLastPathComponent()) }
+        guard try await AppSourceService.packageBundleIdentifier(at: ipa) == input.bundleIdentifier else {
+            throw AppSourceError.invalid("下载的 IPA 应用标识与源记录不一致，已停止安装。")
+        }
+        let records = try StoreLibrary.records().filter { $0.app.deviceUDID == device.udid }
+        let existing = await existingRecord(sourceID: input.bundleIdentifier, deviceUDID: input.deviceUDID, records: records)
+        let profileURL: URL
+        if let existing { profileURL = URL(fileURLWithPath: existing.profilePath) }
+        else if let path = preferences.string(forKey: "profilePath"), FileManager.default.fileExists(atPath: path) {
+            profileURL = URL(fileURLWithPath: path)
+        } else if let record = records.first { profileURL = URL(fileURLWithPath: record.profilePath) }
+        else if let installed = await SigningService.bestInstalledProfileURL(for: device) { profileURL = installed }
+        else { throw AutoSignError.invalidProfile("请先在 Mac AutoSign 选择签名证书和描述文件，或安装一次应用以配置签名团队。") }
+        let seed = try await SigningService.readProfile(at: profileURL)
+        if let team = existing?.teamIdentifier, team != seed.teamIdentifier {
+            throw AutoSignError.invalidProfile("签名团队与原应用不一致，已停止覆盖安装。")
+        }
+        let targetID = existing?.app.bundleIdentifier ?? newBundleIdentifier(sourceID: input.bundleIdentifier, seed: seed)
+        let renewedURL = try await SigningService.requestProfile(for: device, bundleIdentifier: targetID, seed: seed, statusChanged: statusChanged)
+        let renewed = try await SigningService.readProfile(at: renewedURL)
+        let identities = try await SigningService.identities()
+        guard let identity = SigningService.identity(for: renewed, available: identities,
+                                                    preferredID: existing?.identityID ?? preferences.string(forKey: "identityID")) else {
+            throw AutoSignError.invalidProfile("找不到此签名团队的有效证书，请在 Mac 检查 Xcode 账号。")
+        }
+        let signed = ipa.deletingLastPathComponent().appendingPathComponent("signed.ipa")
+        _ = try await SigningService.signAndInstall(ipa: ipa, profileURL: renewedURL, identity: identity,
+            device: device, outputIPA: signed, expectedBundleIdentifier: input.bundleIdentifier,
+            installedBundleIdentifier: targetID, sourceURL: input.sourceURL
+        ) { _, message in statusChanged(message) }
+        return renewed.expirationDate
+    }
+    /// Older manual installs may have a rewritten ID. Their original IPA still identifies the source app.
+    static func existingRecord(sourceID: String, deviceUDID: String, records: [StoreRecord],
+                               originalID: @Sendable (URL) async -> String? = { try? await AppSourceService.packageBundleIdentifier(at: $0) }) async -> StoreRecord? {
+        let owned = records.filter { $0.app.deviceUDID == deviceUDID }
+        if let exact = owned.first(where: { $0.sourceBundleIdentifier == sourceID || $0.app.bundleIdentifier == sourceID }) { return exact }
+        for record in owned {
+            if await originalID(URL(fileURLWithPath: record.ipaPath)) == sourceID { return record }
+        }
+        return nil
+    }
+
+    /// A source's public ID may already belong to its publisher. Each team gets a stable, independent ID.
+    static func newBundleIdentifier(sourceID: String, seed: ProvisioningProfile) -> String {
+        if SigningService.explicitBundleIdentifier(from: seed.applicationIdentifier) == sourceID { return sourceID }
+        let candidate = "\(sourceID).autosign.\(seed.teamIdentifier.lowercased())"
+        if SigningService.isValidBundleIdentifier(candidate) { return candidate }
+        let digest = SHA256.hash(data: Data(sourceID.utf8)).map { String(format: "%02x", $0) }.joined()
+        return "com.autosign.\(seed.teamIdentifier.lowercased()).app\(digest.prefix(24))"
+    }
+}

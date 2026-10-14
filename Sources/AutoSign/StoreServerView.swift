@@ -7,7 +7,7 @@ struct StoreServerView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
             HStack {
-                Label("AutoSign Store · 手机续签", systemImage: "wifi")
+                Label("AutoSign Store · 手机安装与续签", systemImage: "wifi")
                     .font(.headline)
                 Spacer()
                 Toggle("开启局域网服务", isOn: Binding(get: { server.isEnabled }, set: { server.setEnabled($0) }))
@@ -29,7 +29,7 @@ struct StoreServerView: View {
                 }
                 Text("手机与 Mac 连接同一可信局域网，在 AutoSign Store 中发现此 Mac、输入密钥并选择本机设备。服务使用局域网 HTTP；请勿映射到公网。Mac 需要保持运行。")
                     .font(.caption).foregroundStyle(.secondary)
-                Text("成功安装的应用会自动保留原始 IPA 和独立描述文件，供手机续签。首次请用此版本 AutoSign 安装 Store IPA；自身刷新会最后执行，关闭后重新打开即可查看结果。")
+                Text("手机可添加应用源、浏览并选择应用，由 Mac 自动下载、配置签名并安装。新应用使用当前选定的签名团队，安装后保留原始 IPA 和独立描述文件以供续签；升级保留原应用标识和团队。")
                     .font(.caption).foregroundStyle(.secondary)
             }
         }

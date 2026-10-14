@@ -7,6 +7,8 @@ struct StoreRecord: Codable, Sendable {
     let profilePath: String
     var identityID: String
     var teamIdentifier: String? = nil
+    var sourceBundleIdentifier: String? = nil
+    var sourceURL: String? = nil
 }
 
 /// Shared with the existing launchd process. The flock protects read/modify/write across processes.
@@ -25,7 +27,8 @@ enum StoreLibrary {
     }
 
     static func recordInstall(ipa: URL, profileURL: URL, identity: SigningIdentity,
-                              device: AppleDevice, bundle: URL, expiration: Date, teamIdentifier: String) throws {
+                              device: AppleDevice, bundle: URL, expiration: Date, teamIdentifier: String,
+                              sourceBundleIdentifier: String? = nil, sourceURL: String? = nil) throws {
         let data = try Data(contentsOf: bundle.appendingPathComponent("Info.plist"))
         guard let info = try PropertyListSerialization.propertyList(from: data, format: nil) as? [String: Any],
               let bundleID = info["CFBundleIdentifier"] as? String else {
@@ -47,7 +50,9 @@ enum StoreLibrary {
                                expiration: expiration, refreshedAt: Date(), isStore: info["AutoSignStoreClient"] as? Bool == true)
             records.removeAll { $0.app.id == id }
             records.append(StoreRecord(app: app, ipaPath: savedIPA.path, profilePath: savedProfile.path,
-                                       identityID: identity.id, teamIdentifier: teamIdentifier))
+                                       identityID: identity.id, teamIdentifier: teamIdentifier,
+                                       sourceBundleIdentifier: sourceBundleIdentifier ?? existing?.sourceBundleIdentifier,
+                                       sourceURL: sourceURL ?? existing?.sourceURL))
             try StoreJSON.encoder().encode(records).write(to: try directory().appendingPathComponent("library.json"), options: .atomic)
         }
     }

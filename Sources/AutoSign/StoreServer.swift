@@ -6,7 +6,7 @@ import SystemConfiguration
 
 @MainActor
 final class StoreServer: ObservableObject {
-    static let shared = StoreServer()
+    static let shared = StoreServer(sourceLibrary: .shared)
     static let port: UInt16 = 8091
     @Published private(set) var isEnabled = false
     @Published private(set) var status = "局域网服务已关闭"
@@ -18,10 +18,18 @@ final class StoreServer: ObservableObject {
     private var worker: Task<Void, Never>?
     private var devices: [AppleDevice] = []
     private var lastDeviceCheck = Date.distantPast
+    private let devicesProvider: @Sendable () async throws -> [AppleDevice]
+    private let sourceLibrary: SourceLibraryModel
+    private let installExecutor: (@MainActor @Sendable (StoreInstallRequest, SourceAppVersion, @escaping @MainActor @Sendable (String) -> Void) async throws -> Date)?
     private let preferences: UserDefaults
     private let jobsDirectory: URL?
 
-    init(preferences: UserDefaults = .standard, jobsDirectory: URL? = nil) {
+    init(preferences: UserDefaults = .standard, jobsDirectory: URL? = nil, sourceLibrary: SourceLibraryModel? = nil,
+         devicesProvider: @escaping @Sendable () async throws -> [AppleDevice] = { try await DeviceService.connectedDevices() },
+         installExecutor: (@MainActor @Sendable (StoreInstallRequest, SourceAppVersion, @escaping @MainActor @Sendable (String) -> Void) async throws -> Date)? = nil) {
+        self.sourceLibrary = sourceLibrary ?? SourceLibraryModel(preferences: preferences)
+        self.installExecutor = installExecutor
+        self.devicesProvider = devicesProvider
         self.preferences = preferences
         self.jobsDirectory = jobsDirectory
         isEnabled = preferences.bool(forKey: "storeServerEnabled")
@@ -112,14 +120,31 @@ final class StoreServer: ObservableObject {
         do {
             if request.method == "GET", request.path == "/v1/status" {
                 if Date().timeIntervalSince(lastDeviceCheck) > 10 {
-                    devices = try await DeviceService.connectedDevices()
+                    devices = try await devicesProvider()
                     lastDeviceCheck = Date()
                 }
                 let snapshot = StoreSnapshot(protocolVersion: 1, serverName: Host.current().localizedName ?? "AutoSign Mac",
                     devices: devices.filter(\.isPaired).map {
                         StoreDevice(id: $0.udid, name: $0.name, model: $0.marketingName, isConnected: $0.isConnected, isReady: $0.isReadyForInstallation)
-                    }, apps: try StoreLibrary.records().map(\.app), recentJobs: jobs)
+                    }, apps: try StoreLibrary.records().map(\.app), recentJobs: jobs, capabilities: ["sources", "install"])
                 return try .json(snapshot)
+            }
+            if request.method == "GET", request.path == "/v1/sources" {
+                return try .json(sourceLibrary.sources)
+            }
+            if request.method == "POST", ["/v1/sources", "/v1/sources/refresh", "/v1/sources/remove", "/v1/install"].contains(request.path) {
+                guard request.headers["content-type"]?.lowercased().hasPrefix("application/json") == true else {
+                    return .error(415, "请使用 JSON 请求。")
+                }
+                if request.path == "/v1/install" {
+                    let input = try StoreJSON.decoder().decode(StoreInstallRequest.self, from: request.body)
+                    return try .json(await submitInstall(input), status: 202)
+                }
+                guard !isBusy, !sourceLibrary.isBusy else { return .error(409, "Mac 正在处理应用任务，请稍后重试。") }
+                let input = try StoreJSON.decoder().decode(StoreSourceRequest.self, from: request.body)
+                if request.path == "/v1/sources/remove" { try sourceLibrary.removeSource(input.url) }
+                else { _ = try await sourceLibrary.fetchAndSaveSource(input.url) }
+                return try .json(sourceLibrary.sources)
             }
             if request.method == "POST", request.path == "/v1/refresh" {
                 guard request.headers["content-type"]?.lowercased().hasPrefix("application/json") == true else {
@@ -135,6 +160,7 @@ final class StoreServer: ObservableObject {
             }
             return .error(404, "接口不存在。")
         } catch let error as StoreHTTPError { return .error(error.status, error.message) }
+        catch let error as AppSourceError { return .error(400, error.localizedDescription) }
         catch is DecodingError { return .error(400, "请求内容不完整。") }
         catch { return .error(500, error.localizedDescription) }
     }
@@ -158,11 +184,53 @@ final class StoreServer: ObservableObject {
         return job
     }
 
+    func submitInstall(_ input: StoreInstallRequest) async throws -> RefreshJob {
+        if let existing = try StoreJobPlanner.existingInstall(input, jobs: jobs) { return existing }
+        guard !sourceLibrary.isBusy else { throw StoreHTTPError(status: 409, message: "Mac 正在更新源或下载，请稍后重试。") }
+        let available = try await devicesProvider()
+        let job = try StoreJobPlanner.planInstall(input, sources: sourceLibrary.sources, devices: available, jobs: jobs, isBusy: isBusy)
+        // Device discovery yields; a concurrent request may have persisted this request in the meantime.
+        if jobs.contains(where: { $0.id == job.id }) { return job }
+        let previous = jobs
+        jobs.insert(job, at: 0)
+        jobs = Array(jobs.prefix(30))
+        do { try persistJobs() } catch { jobs = previous; throw error }
+        isBusy = true
+        worker = Task { [self] in
+            try? await Task.sleep(for: .seconds(2))
+            await executeInstall(jobID: job.id, input: input)
+            isBusy = false
+            worker = nil
+        }
+        return job
+    }
+
+    private func executeInstall(jobID: String, input: StoreInstallRequest) async {
+        do {
+            try update(jobID, index: 0, state: .running, message: "正在检查源中的最新版本…")
+            let source = try await sourceLibrary.fetchAndSaveSource(input.sourceURL)
+            guard let version = source.catalog.apps.first(where: { $0.id == input.bundleIdentifier })?.latestVersion else {
+                throw AppSourceError.invalid("源中已没有这个应用的可下载版本，请刷新列表。")
+            }
+            let progress: @MainActor @Sendable (String) -> Void = { [weak self] message in
+                self?.updateProgress(jobID, index: 0, message: message)
+            }
+            let expiration: Date
+            if let installExecutor { expiration = try await installExecutor(input, version, progress) }
+            else { expiration = try await StoreInstallService.install(input, version: version, preferences: preferences, statusChanged: progress) }
+            try update(jobID, index: 0, state: .completed, message: "已安装 \(version.displayVersion)，可在“我的应用”续签", expiration: expiration)
+        } catch {
+            do { try update(jobID, index: 0, state: .failed, message: error.localizedDescription) }
+            catch { abortJob(jobID, message: "任务记录写入失败：\(error.localizedDescription)") }
+        }
+        lastDeviceCheck = .distantPast
+    }
+
     private func execute(jobID: String, records: [StoreRecord]) async {
         for (index, record) in records.enumerated() {
             do {
                 try update(jobID, index: index, state: .running, message: "正在连接设备…")
-                let available = try await DeviceService.connectedDevices()
+                let available = try await devicesProvider()
                 guard let device = available.first(where: { $0.udid == record.app.deviceUDID && $0.isReadyForInstallation }) else {
                     throw AutoSignError.command("设备不可用。请解锁设备，检查 Wi-Fi、USB 配对及开发者模式。")
                 }

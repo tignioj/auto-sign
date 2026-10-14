@@ -2,7 +2,7 @@ import SwiftUI
 
 struct ContentView: View {
     @ObservedObject var model: AppModel
-    @StateObject private var sourceLibrary = SourceLibraryModel()
+    @StateObject private var sourceLibrary = SourceLibraryModel.shared
     @State private var useSource = false
 
     var body: some View {

@@ -3,6 +3,7 @@ import Combine
 
 @MainActor
 final class SourceLibraryModel: ObservableObject {
+    static let shared = SourceLibraryModel()
     @Published private(set) var sources: [SavedAppSource]
     @Published var selectedSourceID: String?
     @Published var sourceURLInput = ""
@@ -25,6 +26,35 @@ final class SourceLibraryModel: ObservableObject {
         self.service = service
         sources = AppSourceStore.load(from: preferences)
         selectedSourceID = sources.first?.id
+    }
+
+    /// Shared by the Mac UI and authenticated phone API.
+    func fetchAndSaveSource(_ input: String) async throws -> SavedAppSource {
+        guard !isBusy else { throw AppSourceError.invalid("正在更新源或下载，请稍后重试。") }
+        isRefreshing = true
+        defer { isRefreshing = false }
+        let url = try AppSourceService.sourceURL(from: input)
+        let catalog = try await service.fetchCatalog(at: url)
+        try Task.checkCancellation()
+        let source = SavedAppSource(url: url, catalog: catalog, updatedAt: Date())
+        var updated = sources
+        if let index = updated.firstIndex(where: { $0.id == source.id }) { updated[index] = source }
+        else { updated.append(source) }
+        try AppSourceStore.save(updated, to: preferences)
+        sources = updated
+        sourceErrors[source.id] = nil
+        if selectedSourceID == nil { selectedSourceID = source.id }
+        return source
+    }
+
+    func removeSource(_ input: String) throws {
+        guard !isBusy else { throw AppSourceError.invalid("正在更新源或下载，请稍后重试。") }
+        let id = try AppSourceService.sourceURL(from: input).absoluteString
+        let updated = sources.filter { $0.id != id }
+        try AppSourceStore.save(updated, to: preferences)
+        sources = updated
+        sourceErrors[id] = nil
+        if selectedSourceID == id { selectedSourceID = sources.first?.id }
     }
 
     func addSource(_ input: String) async {

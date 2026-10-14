@@ -200,3 +200,21 @@ struct AppSourceService: Sendable {
         guard integrity.status == 0 else { throw AppSourceError.invalid("IPA 压缩包损坏，请重新下载。") }
     }
 }
+
+extension AppSourceService {
+    /// Read the original identity before provisioning; source metadata alone cannot identify an IPA.
+    static func packageBundleIdentifier(at url: URL) async throws -> String {
+        let listing = try await ProcessRunner.checked("/usr/bin/unzip", ["-Z1", url.path], context: "无法读取 IPA。")
+        let paths = listing.output.split(separator: "\n").map(String.init).filter { path in
+            let parts = path.split(separator: "/")
+            return parts.count == 3 && parts[0] == "Payload" && parts[1].hasSuffix(".app") && parts[2] == "Info.plist"
+        }
+        guard paths.count == 1, let path = paths.first else { throw AppSourceError.invalid("IPA 必须包含一个应用。") }
+        let plist = try await ProcessRunner.checked("/usr/bin/unzip", ["-p", url.path, path], context: "无法读取应用信息。")
+        guard let info = try PropertyListSerialization.propertyList(from: plist.data, format: nil) as? [String: Any],
+              let id = info["CFBundleIdentifier"] as? String, SigningService.isValidBundleIdentifier(id) else {
+            throw AppSourceError.invalid("IPA 的应用标识无效。")
+        }
+        return id
+    }
+}

@@ -84,6 +84,25 @@ enum SigningService {
             refreshMessage = "正在请求 Apple 重新签发描述文件…"
         }
         await statusChanged(refreshMessage)
+        return try await generateProfile(for: device, bundleIdentifier: bundleID, seed: profile,
+                                        statusChanged: statusChanged)
+    }
+
+    static func requestProfile(for device: AppleDevice, bundleIdentifier bundleID: String,
+                               seed profile: ProvisioningProfile,
+                               statusChanged: @escaping @MainActor @Sendable (String) -> Void) async throws -> URL {
+        let operationLock = try SigningOperationLock()
+        defer { withExtendedLifetime(operationLock) {} }
+        return try await generateProfile(for: device, bundleIdentifier: bundleID, seed: profile, statusChanged: statusChanged)
+    }
+
+    private static func generateProfile(for device: AppleDevice, bundleIdentifier bundleID: String,
+                                        seed profile: ProvisioningProfile,
+                                        statusChanged: @escaping @MainActor @Sendable (String) -> Void) async throws -> URL {
+        guard isValidBundleIdentifier(bundleID), !profile.teamIdentifier.isEmpty else {
+            throw AutoSignError.invalidProfile("应用标识或签名团队无效。")
+        }
+        await statusChanged("正在为 \(bundleID) 请求新的描述文件…")
         let project = try provisioningHelperProjectURL()
         let appSupport = try FileManager.default.url(
             for: .applicationSupportDirectory, in: .userDomainMask, appropriateFor: nil, create: true
@@ -169,6 +188,9 @@ enum SigningService {
         identity: SigningIdentity,
         device: AppleDevice,
         outputIPA: URL? = nil,
+        expectedBundleIdentifier: String? = nil,
+        installedBundleIdentifier: String? = nil,
+        sourceURL: String? = nil,
         stageChanged: @escaping @MainActor @Sendable (InstallStage, String) -> Void
     ) async throws -> URL {
         let operationLock = try SigningOperationLock()
@@ -206,6 +228,19 @@ enum SigningService {
         }
 
         var mainBundleID = try bundleIdentifier(at: app)
+        if let expectedBundleIdentifier, mainBundleID != expectedBundleIdentifier {
+            throw AutoSignError.invalidIPA("下载的 IPA 应用标识与源记录不一致，已停止安装。")
+        }
+        if let installedBundleIdentifier, installedBundleIdentifier != mainBundleID {
+            guard profileSupports(profile.applicationIdentifier, bundleID: installedBundleIdentifier) else {
+                throw AutoSignError.incompatibleProfile("描述文件不支持原应用标识，已停止覆盖安装。")
+            }
+            try replaceBundleIdentifier(at: app, with: installedBundleIdentifier)
+            mainBundleID = installedBundleIdentifier
+        }
+        if expectedBundleIdentifier != nil, !profileSupports(profile.applicationIdentifier, bundleID: mainBundleID) {
+            throw AutoSignError.incompatibleProfile("描述文件与应用标识不匹配，已停止安装。")
+        }
         if !profileSupports(profile.applicationIdentifier, bundleID: mainBundleID) {
             guard let replacement = explicitBundleIdentifier(from: profile.applicationIdentifier) else {
                 throw AutoSignError.incompatibleProfile(
@@ -261,8 +296,13 @@ enum SigningService {
         )
         try StoreLibrary.recordInstall(ipa: ipa, profileURL: profileURL, identity: identity,
                                        device: device, bundle: app, expiration: profile.expirationDate,
-                                       teamIdentifier: profile.teamIdentifier)
+                                       teamIdentifier: profile.teamIdentifier,
+                                       sourceBundleIdentifier: expectedBundleIdentifier, sourceURL: sourceURL)
         return output
+    }
+
+    static func isValidBundleIdentifier(_ value: String) -> Bool {
+        value.count <= 255 && value.range(of: "^[A-Za-z0-9-]+(\\.[A-Za-z0-9-]+)+$", options: .regularExpression) == value.startIndex..<value.endIndex
     }
 
     static func profileSupports(_ applicationIdentifier: String, bundleID: String) -> Bool {

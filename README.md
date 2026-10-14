@@ -78,14 +78,20 @@ Mac 需要保持开机、联网，所有目标设备与 Mac 必须位于同一�
 
 ## AutoSign Store 手机客户端
 
-[auto-sign-store](https://github.com/tignioj/auto-sign-store) 提供 iOS 17+ 原生客户端，可在手机查看签名到期时间、逐个 / 批量刷新应用，并刷新 Store 自身。在“从源获取”中添加 AutoSign Store 源、下载最新 IPA，再使用 AutoSign 签名安装；也可以用相邻项目的 `Scripts/build-ipa.sh` 在本地构建。
+[auto-sign-store](https://github.com/tignioj/auto-sign-store) 提供 iOS 17+ 原生客户端，可在手机管理应用源、选择应用让 Mac 自动下载安装，查看签名到期时间、逐个 / 批量刷新应用，并刷新 Store 自身。在“从源获取”中添加 AutoSign Store 源、下载最新 IPA，再使用 AutoSign 签名安装；也可以用相邻项目的 `Scripts/build-ipa.sh` 在本地构建。
 
-在本工具的 **AutoSign Store · 手机续签** 面板开启局域网服务。手机与 Mac 连接同一可信 Wi-Fi，在 Store 中发现 Mac 并输入面板中的配对密钥，核对并选择本机设备后即可发起刷新。服务监听端口 `8091`，通过 Bonjour `_autosign._tcp` 广播；Mac 必须保持运行，首次无线连接前仍需 USB 配对。
+在本工具的 **AutoSign Store · 手机安装与续签** 面板开启局域网服务。手机与 Mac 连接同一可信 Wi-Fi，在 Store 中发现 Mac 并输入面板中的配对密钥，核对并选择本机设备后即可发起刷新。服务监听端口 `8091`，通过 Bonjour `_autosign._tcp` 广播；Mac 必须保持运行，首次无线连接前仍需 USB 配对。
+
+Mac 1.3.0 配合 Store 1.1.0 后，手机“应用源”与 Mac 的“从源获取”共用源订阅。手机可添加、刷新、移除源，浏览和搜索应用，选择目标设备并发起安装。Mac 先保存任务，再重新检查最新源、下载并验证 IPA、向 Xcode 请求匹配的描述文件，然后签名和安装。进度及错误在手机“活动”中显示；手机退出后 Mac 继续执行，重新打开可恢复结果。相同请求编号不会重复安装。
+
+首次安装采用 Mac 当前描述文件的签名团队，为应用生成独立的团队专属 Bundle ID；不会复用 Store 的明确标识覆盖 Store。升级受管理应用保留原标识和团队，后续刷新继续使用已安装版本的原始 IPA。手机不需要输入 Apple ID 或持有证书。两端均需更新；本地构建不更新公开源或 GitHub Release。
 
 成功安装后，原始 IPA 和每应用独立描述文件会保存在 `~/Library/Application Support/AutoSign/Store/`，供客户端重新签名。旧版安装的应用需使用本版覆盖安装一次才能纳入列表。Store 自身最后安装，手机应用关闭不会取消 Mac 任务；重新打开后会恢复任务结果。1.2.1 起主动使匹配的 Xcode 缓存失效以请求新描述文件，免费账号只有获得新 7 天签名且覆盖安装成功后才显示刷新完成。
 
 实现参考：AltStore 的 [`FetchProvisioningProfilesOperation`](https://github.com/altstoreio/AltStore/blob/main/AltStore/Operations/FetchProvisioningProfilesOperation.swift) 每次刷新获取新描述文件；[Apple 的自动签名说明](https://developer.apple.com/help/account/provisioning-profiles/edit-download-or-delete-profiles/) 明确指出本地缓存满足条件时 Xcode 不会请求新描述文件。AutoSign 继续使用 Xcode 已登录的账号完成请求，手机无需输入 Apple ID。
 
 2026-10-14 已用 iPhone18pm 拔线实测 1.2.1：从 Store 1.0.1 build 3 点击批量刷新，Kazumi 和 Store 自身都获得新的 168 小时签名；从手机读取的新描述文件 UUID 和到期时间与安装记录一致。Store 最后覆盖安装，退出后重开能恢复两项成功结果，两款应用均能正常启动。详细时间及验证记录见相邻项目的 [7 天续签实测](../auto-sign-store/README.md#7-天续签修复后实测2026-10-14)。
+
+2026-10-14 已实测 Mac 1.3.0 与 Store 1.1.0：从 iPhone18pm 添加 Kazumi 源并选择安装，Mac 通过局域网完成真实下载、获取新 168 小时描述文件及覆盖安装。Store 进入后台后任务继续，重开可恢复成功结果，Kazumi 正常启动。详见相邻项目的 [手机源安装真机实测](../auto-sign-store/README.md#手机源安装真机实测2026-10-14)。
 
 局域网服务默认关闭，所有接口需要配对密钥；此版本使用 HTTP，只在可信局域网使用，不要将端口映射到公网。完整构建、首次安装、自身刷新和 API 说明见 [`auto-sign-store/README.md`](../auto-sign-store/README.md)。
