@@ -171,7 +171,7 @@ private func refreshRecord(expiry: Date, extensions: [String] = [], entitlements
 }
 
 @Test func helperErrorsDistinguishUnavailableRejectedAndInvalidProfiles() {
-    for (kind, expected) in [("unavailable", "unavailable"), ("unsupported", "unsupported"),
+    for (kind, expected) in [("unavailable", "unavailable"), ("deviceNotFound", "deviceNotFound"), ("unsupported", "unsupported"),
                              ("rejected", "incompatible"), ("invalid", "verification")] {
         let result = CommandResult(status: 11, data: Data("{\"kind\":\"\(kind)\",\"message\":\"test\"}".utf8))
         do {
@@ -180,6 +180,7 @@ private func refreshRecord(expiry: Date, extensions: [String] = [], entitlements
         } catch {
             switch (error, expected) {
             case (ProfileRefreshError.unavailable, "unavailable"), (ProfileRefreshError.unsupported, "unsupported"),
+                 (ProfileRefreshError.deviceNotFound, "deviceNotFound"),
                  (ProfileRefreshError.incompatible, "incompatible"), (ProfileRefreshError.verification, "verification"): break
             default: Issue.record("Wrong error classification: \(error)")
             }
@@ -187,6 +188,71 @@ private func refreshRecord(expiry: Date, extensions: [String] = [], entitlements
     }
     #expect(!DeviceAppVerification.isSignatureFailure("Device is locked"))
     #expect(DeviceAppVerification.isSignatureFailure("The application has an invalid code signature"))
+}
+
+@Test func helperFailureDoesNotDisplaySuccessStatusAsAnError() {
+    for status in ["0", "null"] {
+        let json = "{\"kind\":\"unavailable\",\"message\":\"未找到目标设备\",\"status\":\(status),\"detail\":\"kAMDSuccess\"}"
+        do {
+            _ = try DeviceProfileService.decodeResponse(CommandResult(status: 11, data: Data(json.utf8)))
+            Issue.record("Expected helper failure")
+        } catch { #expect(error.localizedDescription == "未找到目标设备") }
+    }
+    let json = "{\"kind\":\"unavailable\",\"message\":\"无法连接\",\"status\":1,\"detail\":\"kAMDMuxConnectError\"}"
+    do {
+        _ = try DeviceProfileService.decodeResponse(CommandResult(status: 11, data: Data(json.utf8)))
+        Issue.record("Expected helper failure")
+    } catch { #expect(error.localizedDescription.contains("kAMDMuxConnectError")) }
+}
+
+@Test func missingProfileTransportRequiresFreshMatchingReadyAndUnlockedDeviceForFallback() async throws {
+    func device(_ udid: String = "phone", connected: Bool = true, paired: Bool = true, developer: Bool = true) -> AppleDevice {
+        AppleDevice(id: udid, udid: udid, name: "Phone", marketingName: "iPhone", kind: .iPhone,
+                    osVersion: "27.0", isPaired: paired, developerModeEnabled: developer, isConnected: connected)
+    }
+    let target = device()
+    let candidates: [AppleDevice?] = [nil, device("other"), device(connected: false),
+                                      device(paired: false), device(developer: false), target]
+    for (index, candidate) in candidates.enumerated() {
+        var lockChecks = 0
+        let error = try await DeviceProfileService.missingDeviceError("missing", on: target,
+            probe: { requested in
+                #expect(requested.udid == target.udid)
+                return candidate
+            }, isUnlocked: { requested in
+                #expect(requested.udid == target.udid)
+                lockChecks += 1
+                return true
+            })
+        if index == candidates.count - 1 {
+            guard case .unsupported = error else { Issue.record("Ready CoreDevice transport must permit fallback"); continue }
+            #expect(lockChecks == 1)
+        } else {
+            guard case .unavailable = error else { Issue.record("Offline or wrong devices must not permit fallback"); continue }
+            #expect(lockChecks == 0)
+        }
+    }
+    let locked = try await DeviceProfileService.missingDeviceError("missing", on: target,
+        probe: { _ in target }, isUnlocked: { _ in false })
+    guard case .unavailable = locked else { Issue.record("Locked devices must not permit fallback"); return }
+
+    do {
+        _ = try await DeviceProfileService.missingDeviceError("missing", on: target,
+            probe: { _ in target }, isUnlocked: { _ in throw ProfileRefreshError.unavailable("lock probe failed") })
+        Issue.record("Failed lock checks must not permit fallback")
+    } catch { #expect(error.localizedDescription == "lock probe failed") }
+
+    let task = Task {
+        try await DeviceProfileService.missingDeviceError("missing", on: target,
+            probe: { _ in
+                withUnsafeCurrentTask { $0?.cancel() }
+                return target
+            }, isUnlocked: { _ in Issue.record("Cancelled discovery must stop before lock check"); return true })
+    }
+    do {
+        _ = try await task.value
+        Issue.record("Cancelled discovery must not permit fallback")
+    } catch { #expect(error is CancellationError) }
 }
 
 @Test func legacyStoreRecordsStillDecodeWithoutSignatureMetadata() throws {
@@ -274,5 +340,21 @@ private func refreshRecord(expiry: Date, extensions: [String] = [], entitlements
         let report: [String: Any] = ["verifiedAt": ISO8601DateFormatter().string(from: Date()),
             "device": device.name, "deviceUDID": device.udid, "iOSVersion": device.osVersion, "checks": checks]
         try JSONSerialization.data(withJSONObject: report, options: [.prettyPrinted, .sortedKeys]).write(to: url, options: .atomic)
+    }
+}
+
+// Read-only transport diagnosis: does not request new profiles from Apple, install, or launch apps.
+@Test func integrationProfileDiscoveryWhenConfigured() async throws {
+    guard let udid = ProcessInfo.processInfo.environment["AUTOSIGN_INTEGRATION_DISCOVERY_DEVICE"] else { return }
+    let target = AppleDevice(id: udid, udid: udid, name: "Device", marketingName: "iPhone", kind: .iPhone,
+                             osVersion: "", isPaired: true, developerModeEnabled: true, isConnected: true)
+    let device = try #require(await DeviceService.probeConnection(to: target))
+    #expect(device.isReadyForInstallation)
+    do {
+        let profiles = try await DeviceProfileService.installedProfiles(on: device)
+        print("\(device.name): read \(profiles.count) installed profiles through MobileDevice")
+    } catch ProfileRefreshError.unsupported(let message) {
+        // run() has freshly confirmed both the target's readiness and lock state.
+        print("\(device.name): CoreDevice reachable; profile-only transport unavailable: \(message)")
     }
 }

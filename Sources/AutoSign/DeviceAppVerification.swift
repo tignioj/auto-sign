@@ -37,8 +37,7 @@ enum DeviceAppVerification {
 
     @discardableResult
     static func verifyLaunch(_ bundleID: String, on device: AppleDevice, freshLaunch: Bool = false) async throws -> Int {
-        let lock = try await command(["device", "info", "lockState", "--device", device.udid])
-        guard try !JSONDecoder().decode(LockState.self, from: lock).result.passcodeRequired else {
+        guard try await isUnlocked(on: device) else {
             throw ProfileRefreshError.unavailable("手机已锁定，无法验证应用启动；请解锁设备后重新刷新。")
         }
         // Do not terminate a running Store or bring background renewals to the
@@ -54,6 +53,11 @@ enum DeviceAppVerification {
             throw ProfileRefreshError.verification("应用启动后已退出，续签尚未通过启动验证，请解锁设备后检查应用。")
         }
         return pid
+    }
+
+    static func isUnlocked(on device: AppleDevice) async throws -> Bool {
+        let lock = try await command(["device", "info", "lockState", "--device", device.udid])
+        return try !JSONDecoder().decode(LockState.self, from: lock).result.passcodeRequired
     }
 
     static func isSignatureFailure(_ output: String) -> Bool {

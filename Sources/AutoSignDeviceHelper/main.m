@@ -7,7 +7,11 @@
 // prevent AutoSign from starting or using Xcode's full installation path.
 typedef void *DeviceRef;
 typedef void *ServiceRef;
-static CFArrayRef (*deviceList)(void);
+typedef struct { DeviceRef device; uint32_t message; } DeviceNotificationInfo;
+typedef void (*DeviceNotificationCallback)(DeviceNotificationInfo *, void *);
+typedef struct { CFStringRef udid; DeviceRef device; } DeviceSearch;
+static int (*subscribeDevices)(DeviceNotificationCallback, uint32_t, uint32_t, void *, void **, CFDictionaryRef);
+static int (*unsubscribeDevices)(void *);
 static CFStringRef (*deviceIdentifier)(DeviceRef);
 static int (*connectDevice)(DeviceRef);
 static int (*validatePairing)(DeviceRef);
@@ -19,6 +23,15 @@ static int (*sendMessage)(ServiceRef, CFPropertyListRef, CFPropertyListFormat);
 static int (*receiveMessage)(ServiceRef, CFPropertyListRef *, CFPropertyListFormat *);
 static void (*invalidateService)(ServiceRef);
 static const char *(*errorString)(int);
+
+static void deviceNotification(DeviceNotificationInfo *info, void *context) {
+    DeviceSearch *search = context;
+    if (!info || info->message != 1 || !info->device || search->device) return;
+    CFStringRef identifier = deviceIdentifier(info->device);
+    if (identifier && CFEqual(identifier, search->udid))
+        search->device = (DeviceRef)CFRetain(info->device);
+    if (identifier) CFRelease(identifier);
+}
 
 static void timeoutHandler(int signum) {
     const char message[] = "{\"kind\":\"unavailable\",\"message\":\"设备描述文件服务超时，请解锁设备后重试。\"}\n";
@@ -34,7 +47,7 @@ static int reply(NSDictionary *value, int code) {
 }
 
 static int fail(NSString *kind, NSString *message, int status) {
-    const char *description = errorString ? errorString(status) : NULL;
+    const char *description = status != 0 && errorString ? errorString(status) : NULL;
     return reply(@{@"kind": kind, @"message": message, @"status": @(status),
                    @"detail": description ? @(description) : @""}, 11);
 }
@@ -61,7 +74,8 @@ int main(int argc, const char *argv[]) {
         if (!framework) return reply(@{@"kind": @"unsupported", @"message": @"当前系统没有可用的 MobileDevice 描述文件服务。"}, 10);
 #define LOAD(variable, name) do { variable = dlsym(framework, name); if (!variable) \
     return reply(@{@"kind": @"unsupported", @"message": @"当前系统不支持单独管理描述文件：" @name}, 10); } while (0)
-        LOAD(deviceList, "AMDCreateDeviceList");
+        LOAD(subscribeDevices, "AMDeviceNotificationSubscribeWithOptions");
+        LOAD(unsubscribeDevices, "AMDeviceNotificationUnsubscribe");
         LOAD(deviceIdentifier, "AMDeviceCopyDeviceIdentifier");
         LOAD(connectDevice, "AMDeviceConnect");
         LOAD(validatePairing, "AMDeviceValidatePairing");
@@ -75,23 +89,33 @@ int main(int argc, const char *argv[]) {
         errorString = dlsym(framework, "AMDErrorString");
 #undef LOAD
         NSString *udid = @(argv[2]);
-        CFArrayRef devices = deviceList();
+        // ARC may end a bridged Objective-C value's lifetime after the subscribe
+        // call. Keep both the target and options alive through async discovery.
+        DeviceSearch search = { CFBridgingRetain(udid), NULL };
+        void *subscription = NULL;
+        // A fresh helper has no populated device snapshot. Subscribe and run the
+        // discovery loop, explicitly including paired Wi-Fi devices (ios-deploy
+        // uses the same option), before deciding the target is unavailable.
+        CFDictionaryRef options = CFBridgingRetain(@{@"NotificationOptionSearchForPairedDevices": @YES});
+        int discoveryStatus = subscribeDevices(deviceNotification, 0, 0, &search, &subscription, options);
+        if (discoveryStatus || !subscription) {
+            if (subscription) unsubscribeDevices(subscription);
+            if (search.device) CFRelease(search.device);
+            CFRelease(search.udid);
+            CFRelease(options);
+            return fail(@"unavailable", @"无法发现设备的 USB 或 Wi-Fi 描述文件连接。", discoveryStatus);
+        }
         DeviceRef device = NULL;
-        if (devices) {
-            for (CFIndex index = 0; index < CFArrayGetCount(devices); index++) {
-                DeviceRef candidate = (DeviceRef)CFArrayGetValueAtIndex(devices, index);
-                NSString *identifier = CFBridgingRelease(deviceIdentifier(candidate));
-                if ([identifier isEqualToString:udid]) { device = candidate; break; }
-            }
-        }
-        if (!device) {
-            if (devices) CFRelease(devices);
-            return fail(@"unavailable", @"未找到目标设备，请检查 USB 或 Wi-Fi 配对连接。", 0);
-        }
         BOOL connected = NO, session = NO;
         ServiceRef service = NULL;
         int result = 0;
         @try {
+            CFAbsoluteTime deadline = CFAbsoluteTimeGetCurrent() + 10;
+            while (!search.device && CFAbsoluteTimeGetCurrent() < deadline)
+                CFRunLoopRunInMode(kCFRunLoopDefaultMode, 0.1, true);
+            device = search.device;
+            if (!device)
+                return fail(@"deviceNotFound", @"描述文件组件未找到目标设备的 USB 或 Wi-Fi 连接。请通过 USB 连接，或在 Finder 中启用 Wi-Fi 显示。", 0);
             int status = connectDevice(device);
             if (status) return fail(@"unavailable", @"无法连接目标设备。", status);
             connected = YES;
@@ -142,7 +166,10 @@ int main(int argc, const char *argv[]) {
             if (service) invalidateService(service);
             if (session) stopSession(device);
             if (connected) disconnectDevice(device);
-            if (devices) CFRelease(devices);
+            unsubscribeDevices(subscription);
+            if (search.device) CFRelease(search.device);
+            CFRelease(search.udid);
+            CFRelease(options);
         }
         return result;
     }

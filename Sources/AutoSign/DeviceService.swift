@@ -37,7 +37,7 @@ enum DeviceService {
         return try parseDevices(from: Data(contentsOf: jsonURL))
     }
 
-    private static func probeConnection(to device: AppleDevice) async -> AppleDevice? {
+    static func probeConnection(to device: AppleDevice) async -> AppleDevice? {
         let jsonURL = FileManager.default.temporaryDirectory
             .appendingPathComponent("autosign-device-probe-\(UUID().uuidString).json")
         defer { try? FileManager.default.removeItem(at: jsonURL) }
