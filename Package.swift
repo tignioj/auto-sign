@@ -6,11 +6,13 @@ let package = Package(
     platforms: [.macOS(.v14)],
     products: [
         .executable(name: "AutoSign", targets: ["AutoSign"]),
-        .executable(name: "AutoSignDeviceHelper", targets: ["AutoSignDeviceHelper"])
+        .executable(name: "AutoSignDeviceHelper", targets: ["AutoSignDeviceHelper"]),
+        .executable(name: "AutoSignRemoteHelper", targets: ["AutoSignRemoteHelper"])
     ],
     targets: [
         .executableTarget(name: "AutoSign"),
         .executableTarget(name: "AutoSignDeviceHelper", linkerSettings: [.linkedFramework("Foundation")]),
-        .testTarget(name: "AutoSignTests", dependencies: ["AutoSign"])
+        .executableTarget(name: "AutoSignRemoteHelper"),
+        .testTarget(name: "AutoSignTests", dependencies: ["AutoSign", "AutoSignRemoteHelper"])
     ]
 )

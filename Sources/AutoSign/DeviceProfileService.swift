@@ -22,6 +22,7 @@ enum DeviceProfileService {
         var detail: String?
         var status: Int?
         var profiles: [Data]?
+        var transport: String?
     }
 
     static func installedProfiles(on device: AppleDevice) async throws -> [Data] {
@@ -84,7 +85,8 @@ enum DeviceProfileService {
                 return try decodeResponse(result)
             }
         } catch ProfileRefreshError.deviceNotFound(let message) {
-            throw try await missingDeviceError(message, on: device)
+            do { return try await RemoteDeviceProfileService.run(arguments, on: device) }
+            catch ProfileRefreshError.deviceNotFound { throw try await missingDeviceError(message, on: device) }
         }
     }
 

@@ -128,6 +128,15 @@ struct InstallAppsView: View {
                 }
                 .buttonStyle(.borderedProminent).tint(.cyan).disabled(!model.canInstall)
             }
+            if model.selectedDevice != nil {
+                Toggle("此设备仅更新描述文件，禁止覆盖安装", isOn: Binding(
+                    get: { model.profileOnlyRefresh }, set: { model.setProfileOnlyRefresh($0) }))
+                    .toggleStyle(.checkbox).disabled(model.isBusy)
+                if model.profileOnlyRefresh {
+                    Text("适用于此设备的手动、手机及后台续签；连接失败或签名不兼容时会停止，不会重装应用。")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+            }
             if !model.selectedApps.isEmpty && !model.stage.isRunning {
                 if model.profileURL == nil && model.managedApps.isEmpty {
                     Text("首次安装前，请在签名设置中选择描述文件。")

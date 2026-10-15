@@ -315,7 +315,7 @@ private func refreshRecord(expiry: Date, extensions: [String] = [], entitlements
         let original = try await SigningService.readProfile(at: URL(fileURLWithPath: record.profilePath))
         let before = try #require(try await DeviceAppVerification.application(record.app.bundleIdentifier, on: device))
         let result = try await AppRefreshService.refresh(record, on: device,
-            verification: .init(verifyLaunch: true)) { message in print(message) }
+            verification: .init(verifyLaunch: true), allowReinstall: false) { message in print(message) }
         #expect(result.method == .profileOnly)
         #expect(result.expiration > record.app.expiration)
         let after = try #require(try await DeviceAppVerification.application(record.app.bundleIdentifier, on: device))
@@ -325,6 +325,7 @@ private func refreshRecord(expiry: Date, extensions: [String] = [], entitlements
         try await DeviceProfileService.verify(URL(fileURLWithPath: updated.profilePath), on: device)
         let profile = try await SigningService.readProfile(at: URL(fileURLWithPath: updated.profilePath))
         let pid = try await DeviceAppVerification.verifyLaunch(record.app.bundleIdentifier, on: device, freshLaunch: true)
+        RefreshStatusStore.recordApp(updated.app, state: result.message, expiration: result.expiration, success: true)
         checks.append(["app": record.app.name, "bundleIdentifier": record.app.bundleIdentifier,
             "method": result.method.rawValue, "oldUUID": original.uuid, "newUUID": profile.uuid,
             "previousExpiration": ISO8601DateFormatter().string(from: original.expirationDate),
@@ -352,7 +353,7 @@ private func refreshRecord(expiry: Date, extensions: [String] = [], entitlements
     #expect(device.isReadyForInstallation)
     do {
         let profiles = try await DeviceProfileService.installedProfiles(on: device)
-        print("\(device.name): read \(profiles.count) installed profiles through MobileDevice")
+        print("\(device.name): read \(profiles.count) installed profiles through the profile service")
     } catch ProfileRefreshError.unsupported(let message) {
         // run() has freshly confirmed both the target's readiness and lock state.
         print("\(device.name): CoreDevice reachable; profile-only transport unavailable: \(message)")

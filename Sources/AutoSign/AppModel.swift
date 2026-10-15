@@ -16,6 +16,7 @@ final class AppModel: ObservableObject {
     @Published var detail = "选择一台设备，再选择源中的应用"
     @Published var isRefreshing = false
     @Published var pairingDeviceID: String?
+    @Published private(set) var profileOnlyRefresh = false
     @Published var autoRefreshEnabled = BackgroundRefreshManager.isInstalled
     @Published var lastBackgroundStatus = BackgroundRefreshManager.lastStatus
     let sourceLibrary: SourceLibraryModel
@@ -120,6 +121,7 @@ final class AppModel: ObservableObject {
         }
         didInitializeDeviceSelection = true
         selectedDeviceID = target?.id
+        profileOnlyRefresh = target.map { ProfileRefreshPolicy.profileOnly(on: $0.udid, preferences: preferences) } ?? false
         if previousUDID != target?.udid {
             selectedApps = []
             operationItems = []
@@ -159,6 +161,7 @@ final class AppModel: ObservableObject {
         deviceKind = kind
         if selectedDevice?.kind != kind {
             selectedDeviceID = nil
+            profileOnlyRefresh = false
             preferences.removeObject(forKey: Self.selectedDevicePreferenceKey)
             managedApps = [:]
             clearAppSelection()
@@ -173,6 +176,7 @@ final class AppModel: ObservableObject {
             managedApps = [:]
         }
         selectedDeviceID = device.id
+        profileOnlyRefresh = ProfileRefreshPolicy.profileOnly(on: device.udid, preferences: preferences)
         deviceKind = device.kind
         preferences.set(device.udid, forKey: Self.selectedDevicePreferenceKey)
         stage = .idle
@@ -184,6 +188,12 @@ final class AppModel: ObservableObject {
 
     func isAppSelected(_ app: SourceApp, in source: SavedAppSource) -> Bool {
         selectedApps.contains { $0.id == app.id && $0.sourceURL == source.id }
+    }
+
+    func setProfileOnlyRefresh(_ enabled: Bool) {
+        guard !isBusy, let device = selectedDevice else { return }
+        ProfileRefreshPolicy.setProfileOnly(enabled, on: device.udid, preferences: preferences)
+        profileOnlyRefresh = enabled
     }
 
     func toggleApp(_ app: SourceApp, in source: SavedAppSource) {
