@@ -25,21 +25,24 @@ enum DeviceProfileService {
         var transport: String?
     }
 
-    static func installedProfiles(on device: AppleDevice) async throws -> [Data] {
-        let response = try await run(["list", device.udid], on: device)
+    static func installedProfiles(on device: AppleDevice,
+                                  statusChanged: @escaping @MainActor @Sendable (String) -> Void = { _ in }) async throws -> [Data] {
+        let response = try await run(["list", device.udid], on: device, statusChanged: statusChanged)
         guard let profiles = response.profiles else {
             throw ProfileRefreshError.verification("设备没有返回描述文件列表，无法确认续签结果。")
         }
         return profiles
     }
 
-    static func install(_ url: URL, on device: AppleDevice) async throws {
-        _ = try await run(["install", device.udid, url.path], on: device)
+    static func install(_ url: URL, on device: AppleDevice,
+                        statusChanged: @escaping @MainActor @Sendable (String) -> Void = { _ in }) async throws {
+        _ = try await run(["install", device.udid, url.path], on: device, statusChanged: statusChanged)
     }
 
-    static func verify(_ url: URL, on device: AppleDevice) async throws {
+    static func verify(_ url: URL, on device: AppleDevice,
+                       statusChanged: @escaping @MainActor @Sendable (String) -> Void = { _ in }) async throws {
         let expected = try Data(contentsOf: url)
-        let installed = try await installedProfiles(on: device)
+        let installed = try await installedProfiles(on: device, statusChanged: statusChanged)
         // Exact CMS bytes establish that the device holds the same Apple-signed
         // UUID, issue date, certificates and expiry that we validated locally.
         guard installed.contains(expected) else {
@@ -68,7 +71,8 @@ enum DeviceProfileService {
         return response
     }
 
-    private static func run(_ arguments: [String], on device: AppleDevice) async throws -> Response {
+    private static func run(_ arguments: [String], on device: AppleDevice,
+                            statusChanged: @escaping @MainActor @Sendable (String) -> Void) async throws -> Response {
         try Task.checkCancellation()
         let sibling = Bundle.main.executableURL?.deletingLastPathComponent().appendingPathComponent("AutoSignDeviceHelper")
         let development = URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
@@ -78,15 +82,40 @@ enum DeviceProfileService {
         }) else {
             throw ProfileRefreshError.unsupported("缺少描述文件更新组件，使用完整签名安装。请重新构建完整 AutoSign.app。")
         }
-        do {
-            return try await withConnectionRetry {
+        return try await withTransportRecovery(legacy: {
+            try await withConnectionRetry(operation: {
                 let result = try await ProcessRunner.run(executable.path, arguments)
                 try Task.checkCancellation()
                 return try decodeResponse(result)
+            }, beforeRetry: {
+                await statusChanged("描述文件连接暂时中断，正在重新连接设备…")
+                try await DeviceConnectionRetry.reconnect(to: device)
+            })
+        }, remote: {
+            await statusChanged("正在通过 CoreDevice 重新连接描述文件服务…")
+            return try await RemoteDeviceProfileService.run(arguments, on: device)
+        }, missingDevice: { message in
+            try await missingDeviceError(message, on: device)
+        })
+    }
+
+    static func withTransportRecovery<T>(legacy: () async throws -> T, remote: () async throws -> T,
+                                         missingDevice: (String) async throws -> ProfileRefreshError) async throws -> T {
+        do { return try await legacy() }
+        catch ProfileRefreshError.deviceNotFound(let message) {
+            try Task.checkCancellation()
+            do { return try await remote() }
+            catch ProfileRefreshError.deviceNotFound { throw try await missingDevice(message) }
+        } catch ProfileRefreshError.unavailable(let message) where DeviceConnectionRetry.isTransient(message) {
+            try Task.checkCancellation()
+            // A discovered Wi-Fi device can have a stale legacy Mux endpoint.
+            // Use the independently verified CoreDevice channel before giving up.
+            do { return try await remote() }
+            catch ProfileRefreshError.deviceNotFound(let remoteMessage) {
+                // A transient connection error must never become a capability
+                // failure that permits replacing the installed application.
+                throw ProfileRefreshError.unavailable("\(message)\n\(remoteMessage)")
             }
-        } catch ProfileRefreshError.deviceNotFound(let message) {
-            do { return try await RemoteDeviceProfileService.run(arguments, on: device) }
-            catch ProfileRefreshError.deviceNotFound { throw try await missingDeviceError(message, on: device) }
         }
     }
 
@@ -110,19 +139,6 @@ enum DeviceProfileService {
 
     static func withConnectionRetry<T>(operation: () async throws -> T,
                                       beforeRetry: () async throws -> Void = { try await Task.sleep(for: .seconds(2)) }) async throws -> T {
-        var attempts = 0
-        while true {
-            try Task.checkCancellation()
-            attempts += 1
-            do { return try await operation() }
-            catch {
-                guard attempts < 3, case ProfileRefreshError.unavailable(let message) = error,
-                      ["kAMDMuxConnectError", "kAMDNotConnectedError", "kAMDConnectionFailedError"]
-                        .contains(where: message.contains) else { throw error }
-                // Start a fresh helper/session after the on-demand Wi-Fi transport
-                // has had a chance to become ready. Never retry lock/profile errors.
-                try await beforeRetry()
-            }
-        }
+        try await DeviceConnectionRetry.run(operation: operation, beforeRetry: beforeRetry)
     }
 }

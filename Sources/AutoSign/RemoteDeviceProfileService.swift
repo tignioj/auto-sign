@@ -14,8 +14,9 @@ enum RemoteDeviceProfileService {
         guard let helper = [sibling, development].compactMap({ $0 }).first(where: {
             FileManager.default.isExecutableFile(atPath: $0.path)
         }) else { throw ProfileRefreshError.deviceNotFound("缺少 CoreDevice 描述文件组件，请重新构建完整应用。") }
-        for attempt in 0..<2 {
-            try Task.checkCancellation()
+        return try await DeviceConnectionRetry.run(operation: {
+            // Discovery belongs inside the retry: preparing CoreDevice can also
+            // fail while the Wi-Fi tunnel is being re-established.
             let connection = try await prepare(on: device)
             var lastError: Error = ProfileRefreshError.unavailable("CoreDevice 描述文件连接尚未就绪。")
             for port in connection.ports {
@@ -26,22 +27,23 @@ enum RemoteDeviceProfileService {
                     try Task.checkCancellation()
                     return try DeviceProfileService.decodeResponse(result)
                 } catch ProfileRefreshError.unavailable(let message) {
+                    guard DeviceConnectionRetry.isTransient(message) else { throw ProfileRefreshError.unavailable(message) }
                     lastError = ProfileRefreshError.unavailable(message)
                 }
             }
-            if attempt == 1 { throw lastError }
-            // remoted can redial after a tunnel reset; discover its current port
-            // again rather than reusing a stale endpoint or reinstalling an app.
-            try await Task.sleep(for: .milliseconds(500))
-        }
-        throw ProfileRefreshError.unavailable("CoreDevice 描述文件连接失败。")
+            throw lastError
+        }, beforeRetry: { try await DeviceConnectionRetry.reconnect(to: device) })
     }
 
     private static func prepare(on device: AppleDevice) async throws -> Connection {
         let url = FileManager.default.temporaryDirectory.appendingPathComponent("autosign-remote-\(UUID().uuidString).json")
         defer { try? FileManager.default.removeItem(at: url) }
-        _ = try await ProcessRunner.checked("/usr/bin/xcrun", ["devicectl", "device", "info", "details", "--device", device.udid,
-            "--timeout", "15", "--json-output", url.path, "--quiet"], context: "无法准备 CoreDevice 描述文件连接。")
+        let result = try await ProcessRunner.run("/usr/bin/xcrun", ["devicectl", "device", "info", "details", "--device", device.udid,
+            "--timeout", "15", "--json-output", url.path, "--quiet"])
+        try Task.checkCancellation()
+        guard result.status == 0 else {
+            throw ProfileRefreshError.unavailable("无法准备 CoreDevice 描述文件连接：\(result.output)")
+        }
         let address = try tunnelAddress(from: Data(contentsOf: url), expectedUDID: device.udid)
         async let sockets = ProcessRunner.run("/usr/bin/nettop", ["-n", "-x", "-L", "1", "-m", "tcp", "-J", "interface,state"])
         async let identity = ProcessRunner.run("/usr/libexec/remotectl", ["dumpstate"])

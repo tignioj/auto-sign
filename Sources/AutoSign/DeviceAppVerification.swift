@@ -30,9 +30,15 @@ enum DeviceAppVerification {
         let result: Result
     }
 
-    static func application(_ bundleID: String, on device: AppleDevice) async throws -> Application? {
-        let data = try await command(["device", "info", "apps", "--device", device.udid, "--bundle-id", bundleID])
-        return try JSONDecoder().decode(Applications.self, from: data).result.apps.first { $0.bundleIdentifier == bundleID }
+    static func application(_ bundleID: String, on device: AppleDevice,
+                            statusChanged: @escaping @MainActor @Sendable (String) -> Void = { _ in }) async throws -> Application? {
+        try await DeviceConnectionRetry.run(operation: {
+            let data = try await command(["device", "info", "apps", "--device", device.udid, "--bundle-id", bundleID])
+            return try JSONDecoder().decode(Applications.self, from: data).result.apps.first { $0.bundleIdentifier == bundleID }
+        }, beforeRetry: {
+            await statusChanged("读取应用信息时连接中断，正在重新建立设备连接…")
+            try await DeviceConnectionRetry.reconnect(to: device)
+        })
     }
 
     @discardableResult
@@ -77,7 +83,7 @@ enum DeviceAppVerification {
             if checkingSignature, isSignatureFailure(result.output) {
                 throw ProfileRefreshError.incompatible("应用未通过设备签名检查：\(result.output)")
             }
-            throw ProfileRefreshError.unavailable("设备验证失败（\(arguments.prefix(3).joined(separator: " "))），请保持设备解锁后重试：\(result.output)")
+            throw ProfileRefreshError.unavailable("设备验证失败（\(arguments.prefix(3).joined(separator: " "))）：\(result.output)")
         }
         return try Data(contentsOf: url)
     }

@@ -76,19 +76,19 @@ enum AppRefreshService {
                                  allowReinstall: allowReinstall && !ProfileRefreshPolicy.profileOnly(on: device.udid), profileOnly: {
             let lock = try SigningOperationLock()
             defer { withExtendedLifetime(lock) {} }
-            guard let before = try await DeviceAppVerification.application(record.app.bundleIdentifier, on: device) else {
+            guard let before = try await DeviceAppVerification.application(record.app.bundleIdentifier, on: device, statusChanged: statusChanged) else {
                 throw ProfileRefreshError.incompatible("设备上未找到原应用，需要完整安装")
             }
             await statusChanged("正在更新描述文件，无需重新安装应用…")
-            try await DeviceProfileService.install(profileURL, on: device)
+            try await DeviceProfileService.install(profileURL, on: device, statusChanged: statusChanged)
             await statusChanged(verification.verifyLaunch
                 ? "正在从设备读回描述文件并验证应用启动…" : "正在从设备读回并校验描述文件…")
             try await verification.verify(profile: {
-                try await DeviceProfileService.verify(profileURL, on: device)
+                try await DeviceProfileService.verify(profileURL, on: device, statusChanged: statusChanged)
             }, launch: {
                 try await DeviceAppVerification.verifyLaunch(record.app.bundleIdentifier, on: device)
             })
-            guard try await DeviceAppVerification.application(record.app.bundleIdentifier, on: device) == before else {
+            guard try await DeviceAppVerification.application(record.app.bundleIdentifier, on: device, statusChanged: statusChanged) == before else {
                 throw ProfileRefreshError.verification("验证期间设备上的应用已变化，无法确认本次续签结果。")
             }
             try StoreLibrary.recordProfileRefresh(signedRecord, profileURL: profileURL, expiration: renewed.expirationDate)
