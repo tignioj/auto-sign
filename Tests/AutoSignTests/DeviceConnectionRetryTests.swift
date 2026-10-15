@@ -6,6 +6,7 @@ import Testing
     "Failed to allocate RSD device. (com.apple.mobiledevice error -402653181)",
     "The device disconnected immediately after connecting. (com.apple.dt.CoreDeviceError error 4000)",
     "无法连接目标设备。\nkAMDMuxConnectError",
+    "设备描述文件服务没有返回有效响应。\nkAMDDeviceDisconnectedError",
     "CoreDevice 连接中断或读取超时，请重试。"
 ])
 func transientDeviceReadRecoversAfterReconnecting(message: String) async throws {

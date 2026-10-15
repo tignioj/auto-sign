@@ -104,6 +104,9 @@ enum SigningService {
         guard isValidBundleIdentifier(bundleID), !profile.teamIdentifier.isEmpty else {
             throw AutoSignError.invalidProfile("应用标识或签名团队无效。")
         }
+        // Check before isolating any cached profiles, then again at each actual
+        // invocation in case the screen locked while preparing or retrying.
+        try await XcodeCredentialAccess.waitUntilAvailable(statusChanged: statusChanged)
         await statusChanged("正在为 \(bundleID) 请求新的描述文件…")
         let project = try provisioningHelperProjectURL()
         let appSupport = try FileManager.default.url(
@@ -121,7 +124,8 @@ enum SigningService {
         let requestedAt = Date()
 
         try await DevicePreparationRetry.run {
-            _ = try await ProcessRunner.checked(
+            try await XcodeCredentialAccess.waitUntilAvailable(statusChanged: statusChanged)
+            let result = try await ProcessRunner.run(
                 "/usr/bin/xcrun",
                 [
                     "xcodebuild", "-project", project.path, "-scheme", "ProvisioningHelper",
@@ -129,9 +133,11 @@ enum SigningService {
                     "-derivedDataPath", derivedData.path, "-allowProvisioningUpdates",
                     "-allowProvisioningDeviceRegistration", "DEVELOPMENT_TEAM=\(profile.teamIdentifier)",
                     "PRODUCT_BUNDLE_IDENTIFIER=\(bundleID)", "build"
-                ],
-                context: "Xcode 自动续期失败，具体原因见下方详情。"
+                ]
             )
+            guard result.status == 0 else {
+                throw AutoSignError.command(XcodeCredentialAccess.provisioningFailure(result.output))
+            }
         } beforeRetry: {
             await statusChanged("\(device.name) 的开发者服务尚未准备好，等待 15 秒后自动重试 1 次…")
             try await Task.sleep(for: .seconds(15))

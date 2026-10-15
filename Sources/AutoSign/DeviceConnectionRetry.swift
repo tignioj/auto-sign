@@ -7,7 +7,7 @@ enum DeviceConnectionRetry {
         guard !["device is locked", "device locked", "devicelocked", "passwordprotected", "passcode required",
                 "pairing verification failed", "invalidhostid", "user denied pairing"]
             .contains(where: text.contains) else { return false }
-        return ["kamdmuxconnecterror", "kamdnotconnectederror", "kamdconnectionfailederror",
+        return ["kamdmuxconnecterror", "kamdnotconnectederror", "kamdconnectionfailederror", "kamddevicedisconnectederror",
                 "failed to allocate rsd device", "device disconnected immediately after connecting",
                 "connection reset by peer", "connection refused", "broken pipe",
                 "coredevice 连接失败", "coredevice 连接中断或读取超时", "coredevice 连接中断或写入超时",
