@@ -13,6 +13,19 @@ enum BackgroundRefreshManager {
 
     static var isInstalled: Bool { FileManager.default.fileExists(atPath: launchAgentURL.path) }
 
+    static var needsMigration: Bool {
+        guard isInstalled, let executable = Bundle.main.executableURL,
+              let data = try? Data(contentsOf: launchAgentURL),
+              let plist = try? PropertyListSerialization.propertyList(from: data, format: nil) as? [String: Any] else { return isInstalled }
+        return requiresMigration(plist, executable: executable)
+    }
+
+    static func requiresMigration(_ plist: [String: Any], executable: URL,
+                                  bundleID: String = Bundle.main.bundleIdentifier ?? "local.autosign.desktop") -> Bool {
+        plist["ProgramArguments"] as? [String] != [executable.path, "--background-refresh"]
+            || plist["AssociatedBundleIdentifiers"] as? [String] != [bundleID]
+    }
+
     static var lastStatus: String {
         let message = UserDefaults.standard.string(forKey: statusKey) ?? "尚未运行后台检查"
         guard let date = UserDefaults.standard.object(forKey: dateKey) as? Date else { return message }
@@ -20,6 +33,9 @@ enum BackgroundRefreshManager {
     }
 
     static func install() async throws {
+        guard LocalNetworkPreparation.isPrepared() else {
+            throw AutoSignError.command("请先打开 AutoSign，在前台完成本地网络授权与检查，再开启后台自动续签。")
+        }
         guard let executable = Bundle.main.executableURL else {
             throw AutoSignError.command("无法定位 AutoSign 可执行文件。")
         }
@@ -28,15 +44,7 @@ enum BackgroundRefreshManager {
         try FileManager.default.createDirectory(
             at: launchAgentURL.deletingLastPathComponent(), withIntermediateDirectories: true
         )
-        let plist: [String: Any] = [
-            "Label": label,
-            "ProgramArguments": [executable.path, "--background-refresh"],
-            "RunAtLoad": true,
-            "StartInterval": Int(RefreshStatusStore.interval),
-            "ProcessType": "Background",
-            "StandardOutPath": logs.appendingPathComponent("refresh.log").path,
-            "StandardErrorPath": logs.appendingPathComponent("refresh-error.log").path
-        ]
+        let plist = configuration(executable: executable, logs: logs)
         let data = try PropertyListSerialization.data(fromPropertyList: plist, format: .xml, options: 0)
         try data.write(to: launchAgentURL, options: .atomic)
 
@@ -48,6 +56,19 @@ enum BackgroundRefreshManager {
         )
         UserDefaults.standard.set(true, forKey: "autoRefreshEnabled")
         record("后台任务已安装，每 30 分钟检查一次")
+    }
+
+    static func configuration(executable: URL, logs: URL, bundleID: String = Bundle.main.bundleIdentifier ?? "local.autosign.desktop") -> [String: Any] {
+        [
+            "Label": label,
+            "AssociatedBundleIdentifiers": [bundleID],
+            "ProgramArguments": [executable.path, "--background-refresh"],
+            "RunAtLoad": true,
+            "StartInterval": Int(RefreshStatusStore.interval),
+            "ProcessType": "Background",
+            "StandardOutPath": logs.appendingPathComponent("refresh.log").path,
+            "StandardErrorPath": logs.appendingPathComponent("refresh-error.log").path
+        ]
     }
 
     static func authorizeNotifications() async {

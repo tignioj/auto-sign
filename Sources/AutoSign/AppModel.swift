@@ -19,6 +19,7 @@ final class AppModel: ObservableObject {
     @Published var pairingDeviceID: String?
     @Published private(set) var profileOnlyRefresh = false
     @Published var autoRefreshEnabled = BackgroundRefreshManager.isInstalled
+    @Published private(set) var isChangingAutoRefresh = false
     @Published var lastBackgroundStatus = BackgroundRefreshManager.lastStatus
     let sourceLibrary: SourceLibraryModel
     private let preferences: UserDefaults
@@ -338,11 +339,15 @@ final class AppModel: ObservableObject {
     }
 
     func setAutoRefreshEnabled(_ enabled: Bool) {
-        guard !isBusy else { return }
-        autoRefreshEnabled = enabled
+        guard !isBusy, !isChangingAutoRefresh else { return }
+        isChangingAutoRefresh = true
         Task {
+            defer { isChangingAutoRefresh = false }
             do {
                 if enabled {
+                    guard await LocalNetworkAccess.shared.check() else {
+                        throw AutoSignError.command("请先在前台完成本地网络授权与检查，再开启自动续签。")
+                    }
                     await BackgroundRefreshManager.authorizeNotifications()
                     try await BackgroundRefreshManager.install()
                     lastBackgroundStatus = "后台自动续签已开启"
@@ -351,6 +356,7 @@ final class AppModel: ObservableObject {
                     lastBackgroundStatus = "后台自动续签已关闭"
                 }
                 autoRefreshEnabled = BackgroundRefreshManager.isInstalled
+                await refreshDashboard()
             } catch {
                 autoRefreshEnabled = BackgroundRefreshManager.isInstalled
                 lastBackgroundStatus = error.localizedDescription

@@ -2,16 +2,18 @@ import SwiftUI
 
 struct RenewalDashboardView: View {
     @ObservedObject var model: AppModel
+    @ObservedObject private var localNetwork = LocalNetworkAccess.shared
     @AppStorage(RefreshVerificationOptions.launchPreferenceKey) private var verifyLaunchAfterRefresh = false
 
     var body: some View {
         VStack(spacing: 20) {
+            LocalNetworkAccessView()
             AppCard(title: "续签设置", symbol: "clock.arrow.circlepath") {
                 HStack {
                     Toggle("为已安装的应用自动续签", isOn: Binding(
                         get: { model.autoRefreshEnabled }, set: { model.setAutoRefreshEnabled($0) }
                     ))
-                    .toggleStyle(.switch).disabled(model.isBusy)
+                    .toggleStyle(.switch).disabled(model.isBusy || model.isChangingAutoRefresh || localNetwork.isChecking)
                     Spacer()
                     Button("刷新状态") { Task { await model.refreshDashboard() } }
                 }

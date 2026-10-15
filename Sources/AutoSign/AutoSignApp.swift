@@ -16,7 +16,7 @@ struct AutoSignApp: App {
             mode = .interface
         }
         launchMode = mode
-        _model = StateObject(wrappedValue: AppModel(performInitialRefresh: mode == .interface))
+        _model = StateObject(wrappedValue: AppModel(performInitialRefresh: false))
         if mode != .interface { NSApplication.shared.setActivationPolicy(.accessory) }
     }
 
@@ -25,7 +25,6 @@ struct AutoSignApp: App {
             if launchMode == .interface {
                 ContentView(model: model)
                     .frame(minWidth: 860, minHeight: 680)
-                    .task { StoreServer.shared.startIfEnabled() }
             } else {
                 BackgroundTaskView(mode: launchMode)
                     .frame(width: 1, height: 1)
@@ -54,7 +53,13 @@ private struct BackgroundTaskView: View {
                 NSApplication.shared.windows.forEach { $0.orderOut(nil) }
                 switch mode {
                 case .backgroundRefresh:
-                    await BackgroundRefreshCoordinator.run()
+                    if LocalNetworkPreparation.isPrepared() {
+                        await BackgroundRefreshCoordinator.run()
+                    } else {
+                        let message = "此版本尚未在前台完成本地网络检查。请打开 AutoSign，允许本地网络访问并完成检查后再使用后台续签。"
+                        BackgroundRefreshManager.record(message)
+                        await BackgroundRefreshManager.notify(title: "AutoSign 需要完成首次设置", body: message)
+                    }
                 case .installBackgroundRefresh:
                     try? await BackgroundRefreshManager.install()
                 case .interface:

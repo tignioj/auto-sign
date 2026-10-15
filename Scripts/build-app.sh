@@ -14,6 +14,7 @@ cp "$project_dir/.build/release/AutoSignRemoteHelper" "$contents_dir/MacOS/AutoS
 cp "$project_dir/Resources/AppInfo.plist" "$contents_dir/Info.plist"
 cp "$project_dir/Resources/Brand/AutoSign.icns" "$contents_dir/Resources/AutoSign.icns"
 /usr/bin/ditto "$project_dir/ProvisioningHelper" "$contents_dir/Resources/ProvisioningHelper"
-codesign --force --deep --sign - "$app_dir"
+signing_identity="${AUTOSIGN_MAC_SIGNING_IDENTITY:--}"
+codesign --force --deep --sign "$signing_identity" "$app_dir"
 
 echo "$app_dir"

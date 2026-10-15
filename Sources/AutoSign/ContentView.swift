@@ -5,6 +5,9 @@ struct ContentView: View {
     @ObservedObject private var sourceLibrary: SourceLibraryModel
     @State private var selectedPage: AppPage = .install
     @State private var appSearchText = ""
+    @State private var didPrepareInterface = false
+    @State private var isResumingNetworkFeatures = false
+    @ObservedObject private var localNetwork = LocalNetworkAccess.shared
 
     init(model: AppModel) {
         self.model = model
@@ -25,7 +28,10 @@ struct ContentView: View {
                 VStack(spacing: 0) {
                     pageHeader
                     ScrollView {
-                        pageContent
+                        VStack(spacing: 20) {
+                            if localNetwork.state != .ready && selectedPage != .renewal { LocalNetworkAccessView() }
+                            pageContent
+                        }
                             .frame(maxWidth: 1040, alignment: .topLeading)
                             .frame(maxWidth: .infinity, alignment: .top)
                             .padding(24)
@@ -37,6 +43,15 @@ struct ContentView: View {
         }
         .preferredColorScheme(.dark)
         .task { await sourceLibrary.refreshSources() }
+        .task {
+            if NSApplication.shared.isActive { await prepareInterface() }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
+            Task { await prepareInterface() }
+        }
+        .onChange(of: localNetwork.state) { _, state in
+            if state == .ready { Task { await resumeNetworkFeatures() } }
+        }
         .task {
             while !Task.isCancelled {
                 await model.refreshDashboard()
@@ -50,6 +65,24 @@ struct ContentView: View {
                 await model.refreshAvailableUpdates()
             }
         }
+    }
+
+    private func prepareInterface() async {
+        guard !didPrepareInterface else { return }
+        didPrepareInterface = true
+        if await localNetwork.check() { await resumeNetworkFeatures() }
+        await model.refresh()
+    }
+
+    private func resumeNetworkFeatures() async {
+        guard !isResumingNetworkFeatures else { return }
+        isResumingNetworkFeatures = true
+        defer { isResumingNetworkFeatures = false }
+        if BackgroundRefreshManager.needsMigration {
+            do { try await BackgroundRefreshManager.install() }
+            catch { model.lastBackgroundStatus = "更新后台任务失败：\(error.localizedDescription)" }
+        }
+        StoreServer.shared.startIfEnabled()
     }
 
     private var sidebar: some View {
