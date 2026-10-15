@@ -18,6 +18,16 @@ struct SourceLibraryView: View {
                         .buttonStyle(.borderedProminent).tint(.cyan)
                 }
             } else {
+                if !model.availableUpdates.isEmpty {
+                    VStack(alignment: .leading, spacing: 5) {
+                        Label("此设备有 \(model.availableUpdates.count) 个应用可更新", systemImage: "arrow.down.circle.fill")
+                            .font(.callout.weight(.semibold)).foregroundStyle(.orange)
+                        Text("勾选标记为“可更新”的应用，点击“安装所选应用”升级到最新版本。")
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading).padding(12)
+                    .background(.orange.opacity(0.08), in: RoundedRectangle(cornerRadius: 12))
+                }
                 HStack {
                     Text("\(library.sources.count) 个源 · 共 \(library.sources.reduce(0) { $0 + $1.catalog.apps.count }) 个应用")
                         .font(.callout).foregroundStyle(.secondary)
@@ -95,6 +105,7 @@ struct SourceLibraryView: View {
     private func appRow(_ app: SourceApp, in source: SavedAppSource) -> some View {
         let selected = model.isAppSelected(app, in: source)
         let installed = model.managedApps[app.id]?.app
+        let update = model.availableUpdates.first { $0.bundleIdentifier == app.id && $0.sourceURL == source.id }
         return HStack(alignment: .top, spacing: 12) {
             Toggle(app.name, isOn: Binding(get: { model.isAppSelected(app, in: source) }, set: { _ in
                 model.toggleApp(app, in: source)
@@ -116,14 +127,18 @@ struct SourceLibraryView: View {
                     Text(app.name).font(.headline)
                     Spacer()
                     if model.selectedDevice != nil {
-                        Text(installed == nil ? "未安装" : "已安装").font(.caption)
-                            .foregroundStyle(installed == nil ? Color.secondary : Color.green)
+                        Text(update != nil ? "可更新" : (installed == nil ? "未安装" : "已安装")).font(.caption)
+                            .foregroundStyle(update != nil ? Color.orange : (installed == nil ? Color.secondary : Color.green))
                     }
                 }
                 Text(app.developerName ?? app.bundleIdentifier).font(.caption).foregroundStyle(.secondary)
                 if let installed {
                     Text("此设备：\(installed.version) · 签名到期：\(installed.expiration.formatted(date: .abbreviated, time: .shortened))")
                         .font(.caption).foregroundStyle(.green)
+                }
+                if let update {
+                    Text("可更新：\(update.installedVersion) → \(update.displayVersion)")
+                        .font(.caption.weight(.semibold)).foregroundStyle(.orange)
                 }
                 if let version = app.latestVersion {
                     Text(versionDescription(version)).font(.caption).foregroundStyle(.cyan)

@@ -7,7 +7,15 @@ enum StoreUpdateDetector {
                         packageMetadata: @MainActor (URL) async -> AppSourceService.PackageMetadata? = { try? await AppSourceService.packageMetadata(at: $0) }) async -> [StoreAppUpdate] {
         var updates: [StoreAppUpdate] = []
         for record in records {
-            let candidates = sources.filter { record.sourceURL == nil || $0.id == record.sourceURL }
+            let candidates: [SavedAppSource]
+            if let pinnedURL = record.sourceURL {
+                // Older installs can retain GitHub's explicit refs/heads spelling while
+                // the subscription uses the short branch URL (or the reverse).
+                let source = sources.first { $0.id == pinnedURL }
+                    ?? sources.filter { subscriptionIdentity($0.id) == subscriptionIdentity(pinnedURL) }
+                        .max { $0.updatedAt < $1.updatedAt }
+                candidates = source.map { [$0] } ?? []
+            } else { candidates = sources }
             guard !candidates.isEmpty else { continue }
             let metadata = record.sourceBundleIdentifier == nil || record.app.buildVersion == nil
                 ? await packageMetadata(URL(fileURLWithPath: record.ipaPath)) : nil
@@ -26,6 +34,19 @@ enum StoreUpdateDetector {
                 localizedDescription: release.localizedDescription, installedBuildVersion: installed.buildVersion))
         }
         return updates
+    }
+
+    private static func subscriptionIdentity(_ input: String) -> String {
+        guard let url = try? AppSourceService.sourceURL(from: input),
+              var components = URLComponents(url: url, resolvingAgainstBaseURL: false) else { return input }
+        if components.host == "raw.githubusercontent.com" {
+            var segments = components.percentEncodedPath.components(separatedBy: "/")
+            if segments.count >= 7, segments[3] == "refs", segments[4] == "heads" {
+                segments.removeSubrange(3...4)
+                components.percentEncodedPath = segments.joined(separator: "/")
+            }
+        }
+        return components.url?.absoluteString ?? url.absoluteString
     }
 
     static func isNewer(_ release: SourceAppVersion, than app: StoreApp) -> Bool {

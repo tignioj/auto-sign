@@ -45,7 +45,10 @@ struct ContentView: View {
         }
         .onReceive(sourceLibrary.$sources) { _ in
             // Reconcile even when the application browser is not the visible page.
-            Task { model.reconcileSelectedApps() }
+            Task {
+                model.reconcileSelectedApps()
+                await model.refreshAvailableUpdates()
+            }
         }
     }
 
@@ -100,7 +103,12 @@ struct ContentView: View {
                         Image(systemName: page.symbol).frame(width: 20)
                         Text(page.title).font(.callout.weight(selectedPage == page ? .semibold : .regular))
                         Spacer(minLength: 0)
-                        if page == .install && !model.selectedApps.isEmpty {
+                        if page == .install && !model.availableUpdates.isEmpty {
+                            Text("\(model.availableUpdates.count) 更新").font(.caption.weight(.medium))
+                                .foregroundStyle(.orange)
+                                .padding(.horizontal, 6).padding(.vertical, 2)
+                                .background(.orange.opacity(0.12), in: Capsule())
+                        } else if page == .install && !model.selectedApps.isEmpty {
                             Text("\(model.selectedApps.count)").font(.caption.weight(.medium))
                                 .padding(.horizontal, 6).padding(.vertical, 2)
                                 .background(.white.opacity(0.08), in: Capsule())

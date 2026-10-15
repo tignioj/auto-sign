@@ -56,6 +56,30 @@ private func updateSource(_ url: String = updateURL, version: String = "2.0") th
     #expect(buildUpdate.first?.buildVersion == "20")
 }
 
+@Test @MainActor func updatesMatchGitHubBranchAliasesWithoutChangingPublishers() async throws {
+    let shortURL = AppSourceService.kazumiSourceURL
+    let explicitURL = shortURL.replacingOccurrences(of: "/kazumi/generated/", with: "/refs/heads/kazumi/generated/")
+    let source = try updateSource(shortURL, version: "2.3.9")
+    let record = updateRecord(version: "2.3.8", build: "20308", sourceURL: explicitURL)
+    let updates = await StoreUpdateDetector.updates(records: [record], sources: [source])
+    #expect(updates.count == 1)
+    #expect(updates.first?.installedVersion == "2.3.8")
+    #expect(updates.first?.version == "2.3.9")
+    #expect(updates.first?.sourceURL == shortURL)
+    let explicitSource = try updateSource(explicitURL, version: "2.3.9")
+    #expect(await StoreUpdateDetector.updates(records: [updateRecord(sourceURL: shortURL)], sources: [explicitSource]).count == 1)
+    // Keeping both spellings subscribed must not make a pinned install ambiguous.
+    #expect(await StoreUpdateDetector.updates(records: [record], sources: [source, explicitSource]).count == 1)
+    for unrelated in [
+        shortURL.replacingOccurrences(of: "/kazumi/generated/", with: "/main/generated/"),
+        shortURL.replacingOccurrences(of: "/kazumi/generated/", with: "/refs/tags/kazumi/generated/"),
+        shortURL.replacingOccurrences(of: "ChouChiu/", with: "another-publisher/"),
+        shortURL.replacingOccurrences(of: "Kazumi-AltStore-Source/", with: "another-repository/")
+    ] {
+        #expect(await StoreUpdateDetector.updates(records: [record], sources: [try updateSource(unrelated)]).isEmpty)
+    }
+}
+
 private final class UpdateSourceProtocol: URLProtocol, @unchecked Sendable {
     override class func canInit(with request: URLRequest) -> Bool { true }
     override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
@@ -176,6 +200,53 @@ private final class UpdateSourceProtocol: URLProtocol, @unchecked Sendable {
     let restarted = StoreServer(preferences: harness.preferences, jobsDirectory: harness.directory)
     #expect(try await restarted.submitUpdates(input).id == job.id)
     #expect(harness.installed.count == 2)
+}
+
+@Test @MainActor func statusOffersUpdatesForAnInstalledGitHubBranchAlias() async throws {
+    let shortURL = AppSourceService.kazumiSourceURL
+    let harness = try UpdateHarness(sourceURL: shortURL, freshVersion: "2.3.9")
+    defer { harness.close() }
+    harness.records = [updateRecord(version: "2.3.8", build: "20308",
+        sourceURL: shortURL.replacingOccurrences(of: "/kazumi/generated/", with: "/refs/heads/kazumi/generated/"))]
+    let snapshot = try StoreJSON.decoder().decode(StoreSnapshot.self, from: await harness.call("/v1/status").body)
+    #expect(snapshot.availableUpdates?.count == 1)
+    #expect(snapshot.availableUpdates?.first?.version == "2.3.9")
+    #expect(snapshot.availableUpdates?.first?.sourceURL == shortURL)
+}
+
+@Test @MainActor func macUpdateIndicatorsFollowTheSelectedDeviceAndRefreshedSources() async throws {
+    let suite = "AutoSignTests.MacUpdates.\(UUID().uuidString)"
+    let preferences = try #require(UserDefaults(suiteName: suite))
+    defer { preferences.removePersistentDomain(forName: suite) }
+    let shortURL = AppSourceService.kazumiSourceURL
+    try AppSourceStore.save([updateSource(shortURL, version: "2.3.9")], to: preferences)
+    let library = SourceLibraryModel(preferences: preferences)
+    let records = [updateRecord(version: "2.3.8", sourceURL: shortURL.replacingOccurrences(of: "/kazumi/generated/", with: "/refs/heads/kazumi/generated/")),
+                   updateRecord("tablet-demo", device: "tablet", version: "2.3.9", build: "20", sourceURL: shortURL)]
+    let model = AppModel(performInitialRefresh: false, preferences: preferences, sourceLibrary: library,
+                         dependencies: .init(records: { records }))
+    model.updateDevices([updateDevice])
+    await model.refreshAvailableUpdates()
+    #expect(model.availableUpdates.map(\.id) == ["demo"])
+    #expect(model.availableUpdates.first?.version == "2.3.9")
+    try library.removeSource(shortURL)
+    await model.refreshAvailableUpdates()
+    #expect(model.availableUpdates.isEmpty)
+    try AppSourceStore.save([updateSource(shortURL, version: "2.3.9")], to: preferences)
+    let reopened = AppModel(performInitialRefresh: false, preferences: preferences,
+        sourceLibrary: SourceLibraryModel(preferences: preferences), dependencies: .init(records: { records }))
+    reopened.updateDevices([updateDevice])
+    await reopened.refreshAvailableUpdates()
+    #expect(reopened.availableUpdates.count == 1)
+    let tablet = AppleDevice(id: "tablet", udid: "tablet", name: "Tablet", marketingName: "iPad", kind: .iPad,
+        osVersion: "17.0", isPaired: true, developerModeEnabled: true, isConnected: true)
+    reopened.updateDevices([tablet])
+    #expect(reopened.availableUpdates.isEmpty)
+    preferences.set("tablet", forKey: AppModel.selectedDevicePreferenceKey)
+    reopened.updateDevices([updateDevice, tablet])
+    await reopened.refreshAvailableUpdates()
+    #expect(reopened.selectedDevice?.udid == "tablet")
+    #expect(reopened.availableUpdates.isEmpty)
 }
 
 @Test @MainActor func partialUpdateFailureKeepsFailedAppAvailableAndContinuesWithStore() async throws {

@@ -8,6 +8,7 @@ final class AppModel: ObservableObject {
     @Published private(set) var selectedDeviceID: String?
     @Published private(set) var selectedApps: [SourceAppSelection] = []
     @Published private(set) var managedApps: [String: StoreRecord] = [:]
+    @Published private(set) var availableUpdates: [StoreAppUpdate] = []
     @Published private(set) var operationItems: [RefreshItem] = []
     @Published var profileURL: URL?
     @Published var identities: [SigningIdentity] = []
@@ -68,6 +69,7 @@ final class AppModel: ObservableObject {
                 }
             }
         } else { managedApps = [:] }
+        await refreshAvailableUpdates()
         if autoRefreshEnabled {
             let result = try? await ProcessRunner.run("/bin/launchctl", ["print", "gui/\(getuid())/\(BackgroundRefreshManager.label)"])
             schedulerStatus = result?.status == 0 ? "后台任务已加载 · 每 30 分钟检查" : "后台任务未加载，请关闭再开启自动续签"
@@ -75,6 +77,21 @@ final class AppModel: ObservableObject {
     }
 
     private var didInitializeDeviceSelection = false
+    private var updateCheckGeneration = UUID()
+
+    func refreshAvailableUpdates() async {
+        let generation = UUID()
+        updateCheckGeneration = generation
+        guard let device = selectedDevice else { availableUpdates = []; return }
+        do {
+            let records = try dependencies.records().filter { $0.app.deviceUDID == device.udid }
+            let updates = await StoreUpdateDetector.updates(records: records, sources: sourceLibrary.sources)
+            guard updateCheckGeneration == generation, selectedDevice?.udid == device.udid else { return }
+            availableUpdates = updates
+        } catch {
+            if updateCheckGeneration == generation { availableUpdates = [] }
+        }
+    }
 
     var filteredDevices: [AppleDevice] { devices.filter { $0.kind == deviceKind } }
     var selectedDevice: AppleDevice? { devices.first { $0.id == selectedDeviceID } }
@@ -126,6 +143,7 @@ final class AppModel: ObservableObject {
             selectedApps = []
             operationItems = []
             managedApps = [:]
+            availableUpdates = []
         }
         if let target {
             deviceKind = target.kind
@@ -164,6 +182,7 @@ final class AppModel: ObservableObject {
             profileOnlyRefresh = false
             preferences.removeObject(forKey: Self.selectedDevicePreferenceKey)
             managedApps = [:]
+            availableUpdates = []
             clearAppSelection()
             detail = "请选择一台 \(kind.title)"
         }
@@ -174,6 +193,7 @@ final class AppModel: ObservableObject {
         if selectedDevice?.udid != device.udid {
             clearAppSelection()
             managedApps = [:]
+            availableUpdates = []
         }
         selectedDeviceID = device.id
         profileOnlyRefresh = ProfileRefreshPolicy.profileOnly(on: device.udid, preferences: preferences)
