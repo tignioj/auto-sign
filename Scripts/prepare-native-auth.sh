@@ -59,6 +59,18 @@ if method.count(old) == 1:
 elif old in method or new not in method:
     raise SystemExit('Pinned AltSign Boolean callback changed; review the Intel compatibility patch.')
 write_if_changed(api, source[:start] + method + source[end:])
+
+# Xcode creates unified Apple Development certificates (DEVELOPMENT), which the
+# upstream iOS-only filter omits. Return both types, including their public DER
+# data, so AutoSign can match an existing signing identity before creating one.
+source = api.read_text()
+old = '@{@"filter[certificateType]": @"IOS_DEVELOPMENT"}'
+new = '@{@"filter[certificateType]": @"IOS_DEVELOPMENT,DEVELOPMENT", @"limit": @"200"}'
+if source.count(old) == 1:
+    source = source.replace(old, new, 1)
+elif old in source or source.count(new) != 1:
+    raise SystemExit('Pinned AltSign certificate query changed; review development certificate reuse.')
+write_if_changed(api, source)
 PY
 # AltSign's Swift package needs its bundled corecrypto archive, which AltServer
 # normally supplies from its Xcode workspace. No Apple account is used here.

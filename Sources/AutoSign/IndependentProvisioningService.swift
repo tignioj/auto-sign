@@ -63,7 +63,7 @@ enum IndependentProvisioningService {
             throw AutoSignError.command("Apple 账号中未找到此应用原有签名证书。已停止续签且未撤销其他证书，请在签名设置检查原团队的证书。")
         }
         if original.signingCertificateHashes.isEmpty {
-            try await ensureCertificate(certificates, team: team, session: session)
+            try await ensureCertificate(certificates, team: team, session: session, statusChanged: statusChanged)
         }
         let appIDs: [ALTAppID] = try await AltAppleBridge.value {
             api.fetchAppIDs(for: team, session: session, completionHandler: $0)
@@ -136,25 +136,37 @@ enum IndependentProvisioningService {
             provisionsAllDevices: false, entitlements: [:], timeToLiveDays: team.isFree ? 7 : nil)
     }
 
+    static func reusableIdentity(certificates: [ALTCertificate], identities: [SigningIdentity]) -> SigningIdentity? {
+        let hashes = Set(certificates.compactMap { $0.data.flatMap(certificateHash) })
+        return identities.first { hashes.contains($0.hash.uppercased()) }
+    }
+
     private static func ensureCertificate(_ certificates: [ALTCertificate], team: ALTTeam,
-                                          session: ALTAppleAPISession) async throws {
+                                          session: ALTAppleAPISession,
+                                          statusChanged: @escaping @MainActor @Sendable (String) -> Void) async throws {
         let local = try await SigningService.identities()
-        if certificates.contains(where: { certificate in
-            guard let data = certificate.data, let hash = certificateHash(data) else { return false }
-            return local.contains { $0.hash == hash }
-        }) { return }
+        if reusableIdentity(certificates: certificates, identities: local) != nil {
+            statusChanged("正在复用本机已有开发证书，不申请新证书…")
+            return
+        }
         // Recover only this app's private key. Never revoke a certificate to make room.
         let key = "signing-certificate-" + team.identifier
         if let p12 = try AppleAccountStore.loadData(account: key) {
             try importCertificate(p12)
             let recovered = try await SigningService.identities()
-            if certificates.contains(where: { certificate in
-                guard let data = certificate.data, let hash = certificateHash(data) else { return false }
-                return recovered.contains { $0.hash == hash }
-            }) { return }
+            if reusableIdentity(certificates: certificates, identities: recovered) != nil {
+                statusChanged("已恢复并复用 AutoSign 保存的开发证书…")
+                return
+            }
         }
-        let certificate: ALTCertificate = try await AltAppleBridge.value {
-            ALTAppleAPI.shared.addCertificate(machineName: "AutoSign", to: team, session: session, completionHandler: $0)
+        let certificate: ALTCertificate
+        do {
+            certificate = try await AltAppleBridge.value {
+                ALTAppleAPI.shared.addCertificate(machineName: "AutoSign", to: team, session: session, completionHandler: $0)
+            }
+        } catch {
+            guard IndependentAccountModel.appleErrorCode(error) == 7460 else { throw error }
+            throw AutoSignError.command("Apple 拒绝创建开发证书（7460）：此团队已有开发证书或待处理申请，但本机未找到匹配的可用私钥。请从原签名 Mac 导入包含私钥的 .p12 后刷新本机证书；现有证书未被撤销。")
         }
         guard let p12 = certificate.p12Data() else { throw IndependentAccountError.invalidResponse }
         // Save the issued key before import so an interrupted setup can recover it.

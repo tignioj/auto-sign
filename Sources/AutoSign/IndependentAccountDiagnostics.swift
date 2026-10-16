@@ -24,6 +24,15 @@ enum IndependentAccountDiagnostics {
                 let teams = try await AltAppleBridge.teams(account: IndependentProvisioningService.makeAccount(credentials), session: session)
                 report["appleSessionValid"] = !teams.isEmpty
                 report["freeTeamAvailable"] = teams.contains { $0.type == .free }
+                if let team = teams.first(where: { $0.identifier == IndependentAccountModel.shared.selectedTeamID }) {
+                    let certificates: [ALTCertificate] = try await AltAppleBridge.value {
+                        ALTAppleAPI.shared.fetchCertificates(for: team, session: session, completionHandler: $0)
+                    }
+                    let identities = try await SigningService.identities()
+                    report["developmentCertificateHashes"] = certificates.compactMap { $0.data.flatMap(IndependentProvisioningService.certificateHash) }.sorted()
+                    report["developmentCertificateCount"] = certificates.count
+                    report["reusableSigningIdentity"] = IndependentProvisioningService.reusableIdentity(certificates: certificates, identities: identities) != nil
+                }
             } else { report["signInRequired"] = true }
         } catch {
             if let local = error as? AutoSignError {

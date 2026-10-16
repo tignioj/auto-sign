@@ -2,7 +2,7 @@
 
 AutoSign 是一个原生 macOS 图形工具，用自己的 Apple 开发者身份，为应用源中的 `.ipa` 重新签名并安装到自己的 iPhone 或 iPad。支持跨源批量安装、按设备和应用自动续签，以及通过 [AutoSign Store](https://github.com/tignioj/auto-sign-store) 手机客户端安装、更新和刷新签名。
 
-当前源码版本为 **1.9.2（build 16）**。安装和续签由 Mac 完成，手机端无需输入 Apple ID 或保存签名证书。新增独立 Apple 账号签发，锁屏真机验收需完成本机登录后执行。
+当前源码版本为 **1.9.3（build 17）**。安装和续签由 Mac 完成，手机端无需输入 Apple ID 或保存签名证书。新增独立 Apple 账号签发，锁屏真机验收需完成本机登录后执行。
 
 ## 使用前准备
 
@@ -188,13 +188,15 @@ Mac 保留最近 30 条手机任务；在记录保留期间，相同请求编号
 
 AutoSign 1.9.0 在“签名设置”提供独立 Apple 账号登录，使用 AltStore 的 AltSign 登录和签发流程，支持免费 Personal Team。在 AutoSign 界面输入 Apple 账号、密码和六位双重验证码；成功后，手机请求、手动续签与后台任务直接向 Apple 签发描述文件，不再读取 Xcode 的账号凭据。已有应用严格沿用各自记录中的团队、标识和证书；新应用使用所选团队。不会为腾出额度自动撤销其他证书，免费账号的证书、App ID、设备和应用数量限制仍由 Apple 执行。
 
+1.9.3 同时查询统一的 Apple Development（`DEVELOPMENT`）与旧 iOS Development（`IOS_DEVELOPMENT`）证书，按公钥证书指纹匹配本机可用签名身份，优先复用已有私钥及 AutoSign 保存的证书。证书由 Xcode 创建也可复用，不依据证书显示名称推断团队。如果 Apple 返回 7460 且仍无匹配私钥，会提示从原签名 Mac 导入 `.p12`，不会自动撤销现有证书。`--verify-independent-account` 只读诊断会报告服务器证书数量、公开指纹及本机是否可复用，不输出私钥或账号凭据。
+
 账号密码、会话、签名私钥备份和本机 Anisette 身份保存在 macOS 系统登录钥匙串中，使用 `SecAccess` 将访问限制到 AutoSign 的代码签名，不启用 iCloud 同步，不开放给所有应用。配置文件仅保存显示用的账号与团队信息。本机构建脚本优先使用可用的 Apple Development 身份，使同一签名团队的应用更新保持稳定访问；更换签名身份后可能需要重新授权。免费账号无需额外签发 macOS 数据保护钥匙串访问组配置文件。读取失败不会清除凭据；会话到期时尝试重新认证，Apple 再次要求双重验证时需回到 AutoSign 完成登录。
 
 设备认证支持本机 AnisetteKit 和用户明确选择的 Windows Anisette v3 服务。本机方案首次从 Apple 下载 Apple Music 的认证组件，但 2026-10-12 起上游报告 Apple 以 `-80045` 拒绝 Android 认证，当前本机登录也复现。Windows 方案参考 [AltStore PR #1834](https://github.com/altstoreio/AltStore/pull/1834) 与 [AltSign PR #61](https://github.com/rileytestut/AltSign/pull/61)，尚未成为上游正式修复，部分账号仍可能失败。不会自动连接第三方服务：需在签名设置明确启用自己的服务地址；外部地址必须使用 HTTPS，本机地址仅允许 `http://127.0.0.1:端口` 或 `http://[::1]:端口`。界面不预填公共服务。服务接收随机设备身份、Apple 设备认证握手与 ADI blob；账号密码、验证码、开发者会话令牌和签名私钥不会发送给该服务。拒绝重定向，不关闭 TLS 验证，不使用共享身份。
 
 插电且启用“显示器关闭时防止自动睡眠”、登录钥匙串保持解锁时，可以保留自动锁屏并续签。屏幕锁定与登录钥匙串锁定不同；AutoSign 不更改自动锁屏或钥匙串自动锁定设置。重启后必须先登录一次 Mac；手动锁定登录钥匙串、设置钥匙串闲置锁定或真正系统睡眠时仍不能执行续签。未启用独立账号时仍采用 Xcode 兼容模式，锁屏期间等待解锁。退出独立账号删除 AutoSign 保存的账号密码和会话，保留现有证书、应用和设备认证身份。
 
-本机和自托管设备身份、ADI 数据均保存在钥匙串；不同服务分别保存身份，读取失败不重置。签入后更换服务需先退出并重新登录。组件缓存位于 `AutoSign/Anisette/Libraries/`，不包含账号密码。2026-10-16 已在 macOS 27.0.1、Apple 芯片 Mac 上完成免费账号真实登录，以及插电灭屏、锁屏期间两款 iPhone 应用续签：2/2 成功，均仅更新描述文件并通过设备逐字节读回校验，新有效期均为 168 小时。本机 Windows 服务重启后，全新 AutoSign 进程也在锁屏状态下恢复钥匙串凭据并验证 Apple 会话。详见 [真机验证记录](docs/profile-refresh-verification.md)。其他系统版本、Intel 构建、新账号首次签发证书和新应用安装尚未验证。
+本机和自托管设备身份、ADI 数据均保存在钥匙串；不同服务分别保存身份，读取失败不重置。签入后更换服务需先退出并重新登录。组件缓存位于 `AutoSign/Anisette/Libraries/`，不包含账号密码。2026-10-16 已在 macOS 27.0.1、Apple 芯片 Mac 上完成免费账号真实登录，以及插电灭屏、锁屏期间两款 iPhone 应用续签：2/2 成功，均仅更新描述文件并通过设备逐字节读回校验，新有效期均为 168 小时。本机 Windows 服务重启后，全新 AutoSign 进程也在锁屏状态下恢复钥匙串凭据并验证 Apple 会话。详见 [真机验证记录](docs/profile-refresh-verification.md)。1.9.3 已使用原有开发证书在 iPad Pro 11 M5（iPadOS 27.0.1）首次安装 AutoSign Store 成功；用户完成设备上的开发者信任后，全新进程启动及两秒存活验证通过，服务器三张证书的指纹均保持不变。其他系统版本、Intel 构建及新账号首次签发证书尚未验证。
 
 构建及测试前运行 `./Scripts/prepare-native-auth.sh`，下载锁定版本的 AltSign / AnisetteKit 并构建认证所需的密码库。该脚本为上游 AltSign 的 CAltSign 和 ldid 静态目标补齐 OpenSSL 依赖，恢复其 manifest 预期的头文件布局，并修正一处 Intel 编译器拒绝的 BOOL 失败回调；不改变认证协议。随后运行 `swift test` 或 `./Scripts/build-app.sh`。依赖版本固定在 `Package.resolved`。AltSign、AnisetteKit、Unicorn、OpenSSL 与 corecrypto 各自保留其上游许可；分发需同时遵循相应许可与源码要求。
 
