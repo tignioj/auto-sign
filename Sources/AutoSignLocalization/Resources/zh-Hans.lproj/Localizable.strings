@@ -25,6 +25,7 @@
 "AutoSign 独立账号" = "AutoSign 独立账号";
 "AutoSign 签名证书" = "AutoSign 签名证书";
 "AutoSign 系统钥匙串操作失败（{0}）。凭据不会写入配置文件或日志。" = "AutoSign 系统钥匙串操作失败（{0}）。凭据不会写入配置文件或日志。";
+"AutoSign 钥匙串访问认证失败（-25293）。若刚更新或重新构建应用，请完全退出 AutoSign 后重新打开再试；仍失败时，请解锁登录钥匙串并检查 AutoSign 的代码签名与钥匙串访问控制。原凭据已保留。" = "AutoSign 钥匙串访问认证失败（-25293）。若刚更新或重新构建应用，请完全退出 AutoSign 后重新打开再试；仍失败时，请解锁登录钥匙串并检查 AutoSign 的代码签名与钥匙串访问控制。原凭据已保留。";
 "AutoSign 自动续签失败" = "AutoSign 自动续签失败";
 "AutoSign 自动续签成功" = "AutoSign 自动续签成功";
 "AutoSign 自动续签部分完成" = "AutoSign 自动续签部分完成";

@@ -2,7 +2,7 @@
 
 AutoSign 是一个原生 macOS 图形工具，用自己的 Apple 开发者身份，为应用源中的 `.ipa` 重新签名并安装到自己的 iPhone 或 iPad。支持跨源批量安装、按设备和应用自动续签，以及通过 [AutoSign Store](https://github.com/tignioj/auto-sign-store) 手机客户端安装、更新和刷新签名。
 
-当前源码版本为 **1.10.0（build 18）**。安装和续签由 Mac 完成，手机端无需输入 Apple ID 或保存签名证书。支持简体中文 / English 即时切换，界面及后台续签提示跟随所选语言。独立 Apple 账号签发的锁屏真机验收需完成本机登录后执行。
+当前源码版本为 **1.10.1（build 19）**。安装和续签由 Mac 完成，手机端无需输入 Apple ID 或保存签名证书。支持简体中文 / English 即时切换，界面及后台续签提示跟随所选语言。独立 Apple 账号签发的锁屏真机验收需完成本机登录后执行。
 
 ## 使用前准备
 
@@ -215,6 +215,8 @@ AutoSign 1.9.0 在“签名设置”提供独立 Apple 账号登录，使用 Alt
 脚本从 Apple 下载固定版本 iTunes 12.13.11.1，校验安装包及 CoreADI64.dll 的 SHA-256，在本机构建隔离服务。仅发布 `127.0.0.1:6969`，不向局域网开放；随后在 AutoSign 的服务地址填写 `http://127.0.0.1:6969` 并启用。可用 `AUTOSIGN_ANISETTE_PORT` 更换端口。容器不接收 Apple 账号、密码、验证码、开发者令牌或签名私钥；设备认证文件在容器内存目录中临时恢复，请求结束即清理，持久化副本由 AutoSign 保存在 Mac 系统钥匙串。运行服务需保持 Docker Desktop 启动；容器采用 `unless-stopped` 重启策略。通过 `docker stop autosign-anisette-local` 可停止服务，钥匙串凭据保留。Apple 组件只下载到本机构建缓存，不随 AutoSign 应用或仓库分发。
 
 真实登录后可用 `dist/AutoSign.app/Contents/MacOS/AutoSign --verify-independent-account` 在全新进程中验证钥匙串、本机设备认证和 Apple 会话。输出仅包含状态布尔值、时间及有限的诊断错误，不输出密码、令牌或认证头。
+
+如果安装时提示钥匙串认证失败 `-25293`，且刚更新或重新构建过 Mac 应用，请完全退出 AutoSign 后重新打开再试。旧进程可能仍持有更新前的代码签名状态，不代表 Apple 账号密码错误，无需删除凭据或重新登录。构建脚本现在先在临时目录完成打包、签名和验证，再替换应用，避免原地覆盖正在运行的可执行文件；构建后仍需重启应用以使用新版本。重启后仍失败时，请解锁登录钥匙串并检查应用的签名与钥匙串访问控制。
 
 运行数据位于 `~/Library/Application Support/AutoSign/`：
 

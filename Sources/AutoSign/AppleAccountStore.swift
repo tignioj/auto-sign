@@ -125,6 +125,9 @@ enum AppleAccountStore {
     }
 
     nonisolated static func failure(_ status: OSStatus) -> AutoSignError {
+        if status == errSecAuthFailed {
+            return .command(L10n.tr("AutoSign 钥匙串访问认证失败（-25293）。若刚更新或重新构建应用，请完全退出 AutoSign 后重新打开再试；仍失败时，请解锁登录钥匙串并检查 AutoSign 的代码签名与钥匙串访问控制。原凭据已保留。"))
+        }
         if status == errSecMissingEntitlement {
             return .command(L10n.tr("此 AutoSign 构建没有系统钥匙串访问权限，请检查应用代码签名与钥匙串访问控制。"))
         }

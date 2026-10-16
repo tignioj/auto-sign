@@ -46,6 +46,13 @@ import Testing
     #expect(AppleAccountStore.failure(errSecMissingEntitlement).localizedDescription.contains((AppLanguage.current == .english ? "code signature" : "代码签名")))
 }
 
+@Test func keychainAuthorizationFailureExplainsRestartWithoutResettingCredentials() {
+    let message = AppleAccountStore.failure(errSecAuthFailed).localizedDescription
+    #expect(message.contains("-25293"))
+    #expect(message.contains(AppLanguage.current == .english ? "quit AutoSign completely and reopen it" : "完全退出 AutoSign 后重新打开"))
+    #expect(message.contains(AppLanguage.current == .english ? "existing credentials have been kept" : "原凭据已保留"))
+}
+
 @Test func windowsAnisetteRejectsInsecureOrCredentialBearingServiceURLs() {
     #expect(WindowsAnisetteProvider.validatedURL(" https://ANI.EXAMPLE.TEST:443/ ")?.absoluteString == "https://ani.example.test")
     #expect(WindowsAnisetteProvider.validatedURL("http://127.0.0.1:6969")?.absoluteString == "http://127.0.0.1:6969")
