@@ -2,18 +2,18 @@
 
 AutoSign 是一个原生 macOS 图形工具，用自己的 Apple 开发者身份，为应用源中的 `.ipa` 重新签名并安装到自己的 iPhone 或 iPad。支持跨源批量安装、按设备和应用自动续签，以及通过 [AutoSign Store](https://github.com/tignioj/auto-sign-store) 手机客户端安装、更新和刷新签名。
 
-当前源码版本为 **1.5.0（build 8）**。安装和续签由 Mac 完成，手机端无需输入 Apple ID 或保存签名证书。
+当前源码版本为 **1.9.0（build 14）**。安装和续签由 Mac 完成，手机端无需输入 Apple ID 或保存签名证书。新增独立 Apple 账号签发，锁屏真机验收需完成本机登录后执行。
 
 ## 使用前准备
 
-1. 安装支持 Swift 6 的完整 Xcode，完成首次启动所需的组件安装，在 **Xcode → Settings → Accounts** 登录 Apple ID。
+1. 安装支持 Swift 6 的完整 Xcode，完成首次启动所需的组件安装以提供设备工具。使用独立账号时在 AutoSign“签名设置”登录；采用兼容模式时在 **Xcode → Settings → Apple Accounts** 登录 Apple ID。
    首次打开 AutoSign 时，在前台允许本地网络访问并等待“检查通过”；拒绝后可在 **系统设置 → 隐私与安全性 → 本地网络** 中允许 AutoSign，再点击“检查本地网络权限”。此项用于无线安装、手机 Store 连接与后台续签，macOS 14 无此权限要求。
 2. 用 USB 连接所有目标设备、解锁并选择“信任此电脑”。
 3. 如果设备尚未完成开发者配对，在 AutoSign 中逐台点击 **发起配对**，保持设备解锁并确认提示。
 4. 在每台设备的 **设置 → 隐私与安全性 → 开发者模式** 中开启开发者模式并重启。
-5. 在 AutoSign 的“签名设置”确认签名团队和描述文件。AutoSign 会尝试读取钥匙串证书及 Xcode 本地未过期、匹配所选设备的描述文件；也可点击 **选择…** 手动指定该团队的 `.mobileprovision`。
+5. 在 AutoSign 的“签名设置”登录独立 Apple 账号并选择团队，首次安装时自动配置证书和描述文件。兼容模式会读取钥匙串证书及 Xcode 本地未过期、匹配所选设备的描述文件；也可点击 **选择…** 手动指定该团队的 `.mobileprovision`。
 
-首次安装使用所选描述文件确定签名团队，再由 Xcode 为每个应用和目标设备申请独立的新描述文件，无需事先为源中的每款应用手动下载文件。优先使用自己的开发描述文件；免费 Personal Team 可用，签名通常有效 7 天。后续续签或升级沿用各应用已保存的标识和团队。
+独立账号首次安装使用所选团队，直接向 Apple 为应用和目标设备签发描述文件；Xcode 兼容模式使用所选描述文件确定团队，再经 Xcode 申请。无需事先为源中的每款应用手动下载文件。免费 Personal Team 可用，签名通常有效 7 天。后续续签或升级沿用各应用已保存的标识和团队。
 
 如果本机还没有开发描述文件，可先在 Xcode 创建一个 iOS App 工程，选择自己的 Team、唯一 Bundle ID 和自动签名，以已连接的真机为目标构建，再回到 AutoSign 点击 **刷新账号与证书**。需要手动选择时，可在 Finder 的“前往文件夹”中检查以下 Xcode 缓存目录：
 
@@ -81,7 +81,7 @@ swift run AutoSign
 
 ### 续签校验与兼容
 
-Personal Team 免费签名通常只有 7 天有效期。手机 Store 手动刷新或 Mac 进入后台续签窗口时，AutoSign 会备份并隔离匹配该团队与 Bundle ID 的 Xcode 缓存，使用独立构建目录请求 Apple 重新签发描述文件。免费签名必须通过新 UUID、签发日期、新的 7 天有效期及到期时间延长校验，旧文件或有效期不足时直接报错，不会把普通重装显示为续签成功。缓存处理失败时回滚，中断后下次续签会自动恢复；不会撤销开发者证书。如果 Xcode 暂时无法挂载开发者磁盘镜像或等待目标设备准备超时，手动及后台续签都会等待 15 秒后自动重试一次；再次失败时保留错误详情。系统更新后可先通过 Wi-Fi 重试，持续失败再解锁设备并通过 USB 连接，在 Xcode 中检查设备支持。
+Personal Team 免费签名通常只有 7 天有效期。手机 Store 手动刷新或 Mac 进入后台续签窗口时，独立账号直接请求 Apple 重新签发描述文件；Xcode 兼容模式会备份并隔离匹配该团队与 Bundle ID 的缓存，使用独立构建目录请求签发。免费签名必须通过新 UUID、签发日期、新的 7 天有效期及到期时间延长校验，旧文件或有效期不足时直接报错，不会把普通重装显示为续签成功。缓存处理失败时回滚，中断后下次续签会自动恢复；不会撤销开发者证书。如果 Xcode 暂时无法挂载开发者磁盘镜像或等待目标设备准备超时，手动及后台续签都会等待 15 秒后自动重试一次；再次失败时保留错误详情。系统更新后可先通过 Wi-Fi 重试，持续失败再解锁设备并通过 USB 连接，在 Xcode 中检查设备支持。
 
 Mac 1.4.1 起，续签优先通过 macOS 的 MobileDevice / `com.apple.misagent` 服务单独安装新描述文件，不重新签名或传输 IPA。只有已安装证书被新描述文件允许、原签名权限兼容且不包含未单独处理的扩展时才使用此路径。随后读回设备上的原始 CMS 文件，确认与已校验的新文件逐字节一致，检查安装位置和版本保持不变。
 
@@ -148,13 +148,13 @@ Mac 1.7.0 起，“安装应用”侧栏显示当前设备的更新数量，应�
 
 Mac 需要保持开机、当前用户登录且联网，无线目标设备与 Mac 必须位于同一可互访的局域网。每台设备首次无线使用前仍需通过 USB 完成配对，并在 Finder 中启用“连接到 Wi-Fi 时显示此设备”；也可保持 USB 连接。
 
-灭屏、锁屏和系统睡眠是不同状态。插电时开启“使用电源适配器供电且显示器关闭时，防止自动进入睡眠”允许系统在灭屏后继续运行，但不保证锁屏后 Xcode 的账号凭据仍可读取。本机 Xcode 27 的锁屏测试中，凭据读取返回 `errSecInteractionNotAllowed (-25308)`，随后 Xcode 移除了本地账号记录。AutoSign 在请求新描述文件前检查当前登录会话：锁屏时显示“等待 Mac 解锁”，解锁后自动继续；无法确认会话状态时停止调用 Xcode。此检查不绕过锁屏，也不保证锁屏期间即时续签。若此前已出现 `missing Xcode-Username`、`missing Xcode-Token` 或 `No Accounts`，需先解锁 Mac 并在 **Xcode → Settings → Apple Accounts** 重新登录。Mac 在检查通过后再次锁屏仍可能导致凭据读取失败。
+灭屏、锁屏和系统睡眠是不同状态。插电时开启“使用电源适配器供电且显示器关闭时，防止自动进入睡眠”允许系统在灭屏后继续运行，但不保证锁屏后 Xcode 的账号凭据仍可读取。本机 Xcode 27 的锁屏测试中，凭据读取返回 `errSecInteractionNotAllowed (-25308)`，随后 Xcode 移除了本地账号记录。Xcode 兼容模式在请求新描述文件前检查当前登录会话：锁屏时显示“等待 Mac 解锁”，解锁后自动继续；无法确认会话状态时停止调用 Xcode。此检查不绕过锁屏，也不保证锁屏期间即时续签。若此前已出现 `missing Xcode-Username`、`missing Xcode-Token` 或 `No Accounts`，需先解锁 Mac 并在 **Xcode → Settings → Apple Accounts** 重新登录。Mac 在检查通过后再次锁屏仍可能导致凭据读取失败。
 
 后台续签由 launchd 单独启动，关闭 AutoSign 图形界面后仍可执行，无需开启“手机连接”的局域网服务。手机请求和源更新检查则要求 AutoSign 图形应用保持运行。Mac 休眠时任务可能延后，不保证在预计时间执行。移动或重新安装 AutoSign 后，应在新位置关闭再开启自动续签，以更新后台任务的可执行文件路径。
 
 Mac 1.8.0 起，开启后台任务前，AutoSign 会在前台检查本地网络访问。检查未完成或无法确认访问时不会新建后台任务。后台进程还会核对当前可执行文件和位置是否完成过前台检查；更新或移动应用后，请先打开 AutoSign 完成检查。缺少当前版本的检查记录时，后台在访问局域网前停止并提示完成首次设置。已有后台任务会在前台检查通过后自动补上应用关联和当前路径，避免权限首次请求留到无人值守时。
 
-macOS 没有通用的本地网络授权查询 API；这里通过短暂发布和浏览唯一的 AutoSign Bonjour 服务验证当前访问，浏览器启动成功本身不算通过。检查记录也不代替系统权限，用户之后撤销权限或网络不可用时仍可能失败。系统按代码签名识别应用，默认临时签名的构建在更新后可能重新请求授权。正式发行应使用稳定的 Apple 签名身份；本地构建可通过 `AUTOSIGN_MAC_SIGNING_IDENTITY` 指定 Mac 代码签名身份，未指定时仍使用 ad hoc 签名。参见 [Apple 本地网络隐私说明](https://developer.apple.com/documentation/technotes/tn3179-understanding-local-network-privacy)。
+macOS 没有通用的本地网络授权查询 API；这里通过短暂发布和浏览唯一的 AutoSign Bonjour 服务验证当前访问，浏览器启动成功本身不算通过。检查记录也不代替系统权限，用户之后撤销权限或网络不可用时仍可能失败。系统按代码签名识别应用，默认临时签名的构建在更新后可能重新请求授权。正式发行应使用稳定的 Apple 签名身份；本地构建可通过 `AUTOSIGN_MAC_SIGNING_IDENTITY` 指定 Mac 代码签名身份，未指定时优先使用本机可用的 Apple Development 身份，没有可用身份才使用 ad hoc 签名。参见 [Apple 本地网络隐私说明](https://developer.apple.com/documentation/technotes/tn3179-understanding-local-network-privacy)。
 
 ## AutoSign Store 手机客户端
 
@@ -170,7 +170,7 @@ macOS 没有通用的本地网络授权查询 API；这里通过短暂发布和�
 | 源更新检测与一键更新 | 1.4.0 | 1.2.0 |
 | 优先仅更新描述文件续签 | 1.4.1 | 兼容旧客户端，界面说明需 1.2.0 |
 
-手机“应用源”与 Mac 共用源订阅，可添加、刷新、移除源，浏览和搜索应用，选择目标设备并发起安装。Mac 先保存任务，再重新检查最新源、下载并验证 IPA、向 Xcode 请求匹配的描述文件，然后签名和安装。进度及错误在手机“活动”中显示；手机退出后 Mac 继续执行，重新打开可恢复结果。
+手机“应用源”与 Mac 共用源订阅，可添加、刷新、移除源，浏览和搜索应用，选择目标设备并发起安装。Mac 先保存任务，再重新检查最新源、下载并验证 IPA、通过独立账号或 Xcode 兼容模式请求匹配的描述文件，然后签名和安装。进度及错误在手机“活动”中显示；手机退出后 Mac 继续执行，重新打开可恢复结果。
 
 Mac 保留最近 30 条手机任务；在记录保留期间，相同请求编号和参数返回原任务，不会重复安装。Mac 服务重启后，已完成结果保留，未完成项会标记为中断，需要重新发起，不会自动接着安装。
 
@@ -183,6 +183,30 @@ Mac 保留最近 30 条手机任务；在记录保留期间，相同请求编号
 局域网服务默认关闭，所有接口需要配对密钥；此版本使用 HTTP，只在可信局域网使用，不要将端口映射到公网。完整构建、首次安装和自身刷新见 [AutoSign Store README](https://github.com/tignioj/auto-sign-store#readme)，接口定义见 [API v1 说明](https://github.com/tignioj/auto-sign-store#局域网-api-v1)。
 
 ## 本机数据与排错
+
+### 独立 Apple 账号与锁屏续签
+
+AutoSign 1.9.0 在“签名设置”提供独立 Apple 账号登录，使用 AltStore 的 AltSign 登录和签发流程，支持免费 Personal Team。在 AutoSign 界面输入 Apple 账号、密码和六位双重验证码；成功后，手机请求、手动续签与后台任务直接向 Apple 签发描述文件，不再读取 Xcode 的账号凭据。已有应用严格沿用各自记录中的团队、标识和证书；新应用使用所选团队。不会为腾出额度自动撤销其他证书，免费账号的证书、App ID、设备和应用数量限制仍由 Apple 执行。
+
+账号密码、会话、签名私钥备份和本机 Anisette 身份保存在 macOS 系统登录钥匙串中，使用 `SecAccess` 将访问限制到 AutoSign 的代码签名，不启用 iCloud 同步，不开放给所有应用。配置文件仅保存显示用的账号与团队信息。本机构建脚本优先使用可用的 Apple Development 身份，使同一签名团队的应用更新保持稳定访问；更换签名身份后可能需要重新授权。免费账号无需额外签发 macOS 数据保护钥匙串访问组配置文件。读取失败不会清除凭据；会话到期时尝试重新认证，Apple 再次要求双重验证时需回到 AutoSign 完成登录。
+
+设备认证支持本机 AnisetteKit 和用户明确选择的 Windows Anisette v3 服务。本机方案首次从 Apple 下载 Apple Music 的认证组件，但 2026-10-12 起上游报告 Apple 以 `-80045` 拒绝 Android 认证，当前本机登录也复现。Windows 方案参考 [AltStore PR #1834](https://github.com/altstoreio/AltStore/pull/1834) 与 [AltSign PR #61](https://github.com/rileytestut/AltSign/pull/61)，尚未成为上游正式修复，部分账号仍可能失败。不会自动连接第三方服务：需在签名设置明确启用自己的服务地址；外部地址必须使用 HTTPS，本机地址仅允许 `http://127.0.0.1:端口` 或 `http://[::1]:端口`。界面不预填公共服务。服务接收随机设备身份、Apple 设备认证握手与 ADI blob；账号密码、验证码、开发者会话令牌和签名私钥不会发送给该服务。拒绝重定向，不关闭 TLS 验证，不使用共享身份。
+
+插电且启用“显示器关闭时防止自动睡眠”、登录钥匙串保持解锁时，可以保留自动锁屏并续签。屏幕锁定与登录钥匙串锁定不同；AutoSign 不更改自动锁屏或钥匙串自动锁定设置。重启后必须先登录一次 Mac；手动锁定登录钥匙串、设置钥匙串闲置锁定或真正系统睡眠时仍不能执行续签。未启用独立账号时仍采用 Xcode 兼容模式，锁屏期间等待解锁。退出独立账号删除 AutoSign 保存的账号密码和会话，保留现有证书、应用和设备认证身份。
+
+本机和自托管设备身份、ADI 数据均保存在钥匙串；不同服务分别保存身份，读取失败不重置。签入后更换服务需先退出并重新登录。组件缓存位于 `AutoSign/Anisette/Libraries/`，不包含账号密码。2026-10-16 已在 macOS 27.0.1、Apple 芯片 Mac 上完成免费账号真实登录，以及插电灭屏、锁屏期间两款 iPhone 应用续签：2/2 成功，均仅更新描述文件并通过设备逐字节读回校验，新有效期均为 168 小时。本机 Windows 服务重启后，全新 AutoSign 进程也在锁屏状态下恢复钥匙串凭据并验证 Apple 会话。详见 [真机验证记录](docs/profile-refresh-verification.md)。其他系统版本、Intel 构建、新账号首次签发证书和新应用安装尚未验证。
+
+构建及测试前运行 `./Scripts/prepare-native-auth.sh`，下载锁定版本的 AltSign / AnisetteKit 并构建认证所需的密码库。该脚本对上游 AltSign 静态产品缺少 OpenSSL 依赖的 manifest 做一处可复现补丁；不修改上游认证实现。随后运行 `swift test` 或 `./Scripts/build-app.sh`。依赖版本固定在 `Package.resolved`。AltSign、AnisetteKit、Unicorn、OpenSSL 与 corecrypto 各自保留其上游许可；分发需同时遵循相应许可与源码要求。
+
+自托管 Windows 认证服务可在这台 Mac 的 Docker Desktop 中运行：
+
+```sh
+./Scripts/setup-local-anisette.sh
+```
+
+脚本从 Apple 下载固定版本 iTunes 12.13.11.1，校验安装包及 CoreADI64.dll 的 SHA-256，在本机构建隔离服务。仅发布 `127.0.0.1:6969`，不向局域网开放；随后在 AutoSign 的服务地址填写 `http://127.0.0.1:6969` 并启用。可用 `AUTOSIGN_ANISETTE_PORT` 更换端口。容器不接收 Apple 账号、密码、验证码、开发者令牌或签名私钥；设备认证文件在容器内存目录中临时恢复，请求结束即清理，持久化副本由 AutoSign 保存在 Mac 系统钥匙串。运行服务需保持 Docker Desktop 启动；容器采用 `unless-stopped` 重启策略。通过 `docker stop autosign-anisette-local` 可停止服务，钥匙串凭据保留。Apple 组件只下载到本机构建缓存，不随 AutoSign 应用或仓库分发。
+
+真实登录后可用 `dist/AutoSign.app/Contents/MacOS/AutoSign --verify-independent-account` 在全新进程中验证钥匙串、本机设备认证和 Apple 会话。输出仅包含状态布尔值、时间及有限的诊断错误，不输出密码、令牌或认证头。
 
 运行数据位于 `~/Library/Application Support/AutoSign/`：
 
@@ -214,6 +238,7 @@ Mac 保留最近 30 条手机任务；在记录保留期间，相同请求编号
 在项目根目录运行常规自动测试：
 
 ```sh
+./Scripts/prepare-native-auth.sh
 swift test
 ```
 

@@ -8,7 +8,9 @@ struct AutoSignApp: App {
     init() {
         let arguments = ProcessInfo.processInfo.arguments
         let mode: LaunchMode
-        if arguments.contains("--background-refresh") {
+        if arguments.contains("--verify-independent-account") {
+            mode = .verifyIndependentAccount
+        } else if arguments.contains("--background-refresh") {
             mode = .backgroundRefresh
         } else if arguments.contains("--install-background-refresh") {
             mode = .installBackgroundRefresh
@@ -42,6 +44,7 @@ private enum LaunchMode: Equatable {
     case interface
     case backgroundRefresh
     case installBackgroundRefresh
+    case verifyIndependentAccount
 }
 
 private struct BackgroundTaskView: View {
@@ -52,6 +55,8 @@ private struct BackgroundTaskView: View {
             .task {
                 NSApplication.shared.windows.forEach { $0.orderOut(nil) }
                 switch mode {
+                case .verifyIndependentAccount:
+                    await IndependentAccountDiagnostics.run()
                 case .backgroundRefresh:
                     if LocalNetworkPreparation.isPrepared() {
                         await BackgroundRefreshCoordinator.run()

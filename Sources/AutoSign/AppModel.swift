@@ -106,7 +106,7 @@ final class AppModel: ObservableObject {
                         && source.catalog.apps.contains { $0.id == selection.id && $0.latestVersion != nil }
                 }
             }
-            && (profileURL != nil || !managedApps.isEmpty)
+            && (preferences.bool(forKey: IndependentAccountModel.enabledKey) || profileURL != nil || !managedApps.isEmpty)
             && !isBusy && !sourceLibrary.isBusy
     }
     var canRefreshApps: Bool {

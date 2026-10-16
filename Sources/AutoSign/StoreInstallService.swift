@@ -27,14 +27,19 @@ enum StoreInstallService {
             }
             existing = record
         } else { existing = await existingRecord(sourceID: input.bundleIdentifier, deviceUDID: input.deviceUDID, records: records) }
-        let profileURL: URL
-        if let existing { profileURL = URL(fileURLWithPath: existing.profilePath) }
-        else if let path = preferences.string(forKey: "profilePath"), FileManager.default.fileExists(atPath: path) {
-            profileURL = URL(fileURLWithPath: path)
-        } else if let record = records.first { profileURL = URL(fileURLWithPath: record.profilePath) }
-        else if let installed = await SigningService.bestInstalledProfileURL(for: device) { profileURL = installed }
-        else { throw AutoSignError.invalidProfile("请先在 Mac AutoSign 选择签名证书和描述文件，或安装一次应用以配置签名团队。") }
-        let seed = try await SigningService.readProfile(at: profileURL)
+        let seed: ProvisioningProfile
+        if existing == nil && preferences.bool(forKey: IndependentAccountModel.enabledKey) {
+            seed = try IndependentProvisioningService.seedProfile()
+        } else {
+            let profileURL: URL
+            if let existing { profileURL = URL(fileURLWithPath: existing.profilePath) }
+            else if let path = preferences.string(forKey: "profilePath"), FileManager.default.fileExists(atPath: path) {
+                profileURL = URL(fileURLWithPath: path)
+            } else if let record = records.first { profileURL = URL(fileURLWithPath: record.profilePath) }
+            else if let installed = await SigningService.bestInstalledProfileURL(for: device) { profileURL = installed }
+            else { throw AutoSignError.invalidProfile("请先在 Mac AutoSign 选择签名证书和描述文件，或安装一次应用以配置签名团队。") }
+            seed = try await SigningService.readProfile(at: profileURL)
+        }
         if let team = existing?.teamIdentifier, team != seed.teamIdentifier {
             throw AutoSignError.invalidProfile("签名团队与原应用不一致，已停止覆盖安装。")
         }
@@ -47,7 +52,7 @@ enum StoreInstallService {
         let identities = try await SigningService.identities()
         guard let identity = SigningService.identity(for: renewed, available: identities,
                                                     preferredID: existing?.identityID ?? preferences.string(forKey: "identityID")) else {
-            throw AutoSignError.invalidProfile("找不到此签名团队的有效证书，请在 Mac 检查 Xcode 账号。")
+            throw AutoSignError.invalidProfile("找不到此签名团队的有效证书，请在 Mac 检查签名账号与本机证书。")
         }
         let signed = ipa.deletingLastPathComponent().appendingPathComponent("signed.ipa")
         _ = try await SigningService.signAndInstall(ipa: ipa, profileURL: renewedURL, identity: identity,

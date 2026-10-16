@@ -36,7 +36,7 @@ enum AppPage: String, CaseIterable, Identifiable {
         case .devices: "连接、配对并选择本次操作的目标设备。"
         case .renewal: "管理后台续签，查看各设备应用的签名有效期。"
         case .connection: "连接 AutoSign Store，在手机上安装和续签应用。"
-        case .signing: "查看 Xcode 账号，配置签名证书与描述文件。"
+        case .signing: "登录 Apple 账号，管理签名团队、证书与描述文件。"
         case .help: "从首次安装到无线续签，按需查看操作说明。"
         }
     }

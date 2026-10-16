@@ -1,0 +1,22 @@
+{
+  "originHash" : "25be2739302faaaa44ae5b75bc0d90c150d1434d0088e713bb6057cf70989a34",
+  "pins" : [
+    {
+      "identity" : "altsign",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/rileytestut/AltSign.git",
+      "state" : {
+        "revision" : "832d9cec339ea6ef6891011833dbb7227b028a29"
+      }
+    },
+    {
+      "identity" : "anisettekit",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/altstoreio/AnisetteKit.git",
+      "state" : {
+        "revision" : "1f5a7e36553cc865b873f222b87a6486c0bcc7bf"
+      }
+    }
+  ],
+  "version" : 3
+}

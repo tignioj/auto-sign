@@ -12,14 +12,14 @@ enum ProfileRenewalPolicy {
             throw AutoSignError.invalidProfile("新描述文件的签名团队或应用标识不匹配，已停止覆盖安装。")
         }
         guard renewed.provisionsAllDevices || renewed.provisionedDevices.contains(deviceUDID) else {
-            throw AutoSignError.invalidProfile("新描述文件仍未包含目标设备，请检查 Xcode 的设备注册状态。")
+            throw AutoSignError.invalidProfile("新描述文件仍未包含目标设备，请检查签名账号的设备注册状态。")
         }
         guard renewed.uuid != original.uuid,
               let created = renewed.creationDate,
               created >= requestedAt.addingTimeInterval(-120),
               created <= now.addingTimeInterval(120),
               renewed.expirationDate > now else {
-            throw AutoSignError.invalidProfile("Apple 未签发新的描述文件，已停止安装并保留原签名。请检查 Xcode 账号后重试。")
+            throw AutoSignError.invalidProfile("Apple 未签发新的描述文件，已停止安装并保留原签名。请检查签名账号后重试。")
         }
         if requireExtendedExpiry, SigningService.profileSupports(original.applicationIdentifier, bundleID: bundleID),
            renewed.expirationDate <= original.expirationDate {

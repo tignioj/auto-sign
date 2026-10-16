@@ -104,6 +104,10 @@ enum SigningService {
         guard isValidBundleIdentifier(bundleID), !profile.teamIdentifier.isEmpty else {
             throw AutoSignError.invalidProfile("应用标识或签名团队无效。")
         }
+        if IndependentAccountModel.isEnabled {
+            return try await IndependentProvisioningService.profile(for: device, bundleID: bundleID,
+                original: profile, requireExtendedExpiry: requireExtendedExpiry, statusChanged: statusChanged)
+        }
         // Check before isolating any cached profiles, then again at each actual
         // invocation in case the screen locked while preparing or retrying.
         try await XcodeCredentialAccess.waitUntilAvailable(statusChanged: statusChanged)

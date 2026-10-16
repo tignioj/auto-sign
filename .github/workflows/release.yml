@@ -45,7 +45,9 @@ jobs:
         uses: actions/checkout@v7
 
       - name: Run tests
-        run: swift test
+        run: |
+          ./Scripts/prepare-native-auth.sh
+          swift test
 
       - name: Build app
         run: ./Scripts/build-app.sh
