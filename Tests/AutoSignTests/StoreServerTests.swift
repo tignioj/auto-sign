@@ -1,3 +1,4 @@
+import AutoSignLocalization
 import Foundation
 import Network
 import Testing
@@ -95,7 +96,7 @@ private final class HTTPHarness {
                 guard let self else { return }
                 let id = UUID()
                 let client = StoreHTTPConnection(connection: connection, handler: { request in
-                    guard request.headers["authorization"] == "Bearer test-token" else { return .error(401, "配对密钥无效。") }
+                    guard request.headers["authorization"] == "Bearer test-token" else { return .error(401, L10n.tr("配对密钥无效。")) }
                     return try! .json(StoreSnapshot(protocolVersion: 1, serverName: "Test Mac", devices: [], apps: [], recentJobs: []))
                 }, onClose: { [weak self] in self?.connections.removeValue(forKey: id) })
                 self.connections[id] = client

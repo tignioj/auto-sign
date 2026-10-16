@@ -1,3 +1,4 @@
+import AutoSignLocalization
 import Foundation
 import CryptoKit
 
@@ -5,7 +6,7 @@ enum SigningService {
     static func identities() async throws -> [SigningIdentity] {
         let result = try await ProcessRunner.checked(
             "/usr/bin/security", ["find-identity", "-v", "-p", "codesigning"],
-            context: "无法读取钥匙串中的签名证书。"
+            context: L10n.tr("无法读取钥匙串中的签名证书。")
         )
         let pattern = /^\s*\d+\)\s+([0-9A-F]+)\s+"(.+)"$/
         return result.output.split(separator: "\n").compactMap { line in
@@ -17,7 +18,7 @@ enum SigningService {
     static func readProfile(at url: URL) async throws -> ProvisioningProfile {
         let result = try await ProcessRunner.checked(
             "/usr/bin/security", ["cms", "-D", "-i", url.path],
-            context: "无法读取描述文件。"
+            context: L10n.tr("无法读取描述文件。")
         )
         guard let raw = try PropertyListSerialization.propertyList(from: result.data, options: [], format: nil) as? [String: Any],
               let name = raw["Name"] as? String,
@@ -25,7 +26,7 @@ enum SigningService {
               let expiration = raw["ExpirationDate"] as? Date,
               let entitlements = raw["Entitlements"] as? [String: Any],
               let appID = entitlements["application-identifier"] as? String else {
-            throw AutoSignError.invalidProfile("描述文件内容不完整，请重新选择 `.mobileprovision` 文件。")
+            throw AutoSignError.invalidProfile(L10n.tr("描述文件内容不完整，请重新选择 `.mobileprovision` 文件。"))
         }
         return ProvisioningProfile(
             name: name,
@@ -72,16 +73,16 @@ enum SigningService {
               !bundleID.isEmpty, !bundleID.contains("*"),
               profileSupports(profile.applicationIdentifier, bundleID: bundleID),
               !profile.teamIdentifier.isEmpty else {
-            throw AutoSignError.invalidProfile("无法从旧描述文件读取续期所需的 Team ID 或 Bundle ID。")
+            throw AutoSignError.invalidProfile(L10n.tr("无法从旧描述文件读取续期所需的 Team ID 或 Bundle ID。"))
         }
 
         let refreshMessage: String
         if deviceMissing {
-            refreshMessage = "描述文件未包含 \(device.name)，正在通过 Xcode 注册设备并更新…"
+            refreshMessage = L10n.tr("描述文件未包含 \(device.name)，正在通过 Xcode 注册设备并更新…")
         } else if profile.isExpired {
-            refreshMessage = "描述文件已过期，正在通过 Xcode 自动续期…"
+            refreshMessage = L10n.tr("描述文件已过期，正在通过 Xcode 自动续期…")
         } else {
-            refreshMessage = "正在请求 Apple 重新签发描述文件…"
+            refreshMessage = L10n.tr("正在请求 Apple 重新签发描述文件…")
         }
         await statusChanged(refreshMessage)
         return try await generateProfile(for: device, bundleIdentifier: bundleID, seed: profile,
@@ -102,7 +103,7 @@ enum SigningService {
                                         requireExtendedExpiry: Bool = false,
                                         statusChanged: @escaping @MainActor @Sendable (String) -> Void) async throws -> URL {
         guard isValidBundleIdentifier(bundleID), !profile.teamIdentifier.isEmpty else {
-            throw AutoSignError.invalidProfile("应用标识或签名团队无效。")
+            throw AutoSignError.invalidProfile(L10n.tr("应用标识或签名团队无效。"))
         }
         if IndependentAccountModel.isEnabled {
             return try await IndependentProvisioningService.profile(for: device, bundleID: bundleID,
@@ -111,7 +112,7 @@ enum SigningService {
         // Check before isolating any cached profiles, then again at each actual
         // invocation in case the screen locked while preparing or retrying.
         try await XcodeCredentialAccess.waitUntilAvailable(statusChanged: statusChanged)
-        await statusChanged("正在为 \(bundleID) 请求新的描述文件…")
+        await statusChanged(L10n.tr("正在为 \(bundleID) 请求新的描述文件…"))
         let project = try provisioningHelperProjectURL()
         let appSupport = try FileManager.default.url(
             for: .applicationSupportDirectory, in: .userDomainMask, appropriateFor: nil, create: true
@@ -143,14 +144,14 @@ enum SigningService {
                 throw AutoSignError.command(XcodeCredentialAccess.provisioningFailure(result.output))
             }
         } beforeRetry: {
-            await statusChanged("\(device.name) 的开发者服务尚未准备好，等待 15 秒后自动重试 1 次…")
+            await statusChanged(L10n.tr("\(device.name) 的开发者服务尚未准备好，等待 15 秒后自动重试 1 次…"))
             try await Task.sleep(for: .seconds(15))
         }
 
         let generated = derivedData
             .appendingPathComponent("Build/Products/Debug-iphoneos/ProvisioningHelper.app/embedded.mobileprovision")
         guard FileManager.default.fileExists(atPath: generated.path) else {
-            throw AutoSignError.invalidProfile("Xcode 已完成构建，但没有生成新的描述文件。")
+            throw AutoSignError.invalidProfile(L10n.tr("Xcode 已完成构建，但没有生成新的描述文件。"))
         }
         let renewed = try await readProfile(at: generated)
         try ProfileRenewalPolicy.validate(original: profile, renewed: renewed, bundleID: bundleID,
@@ -209,64 +210,64 @@ enum SigningService {
     ) async throws -> URL {
         let operationLock = try SigningOperationLock()
         defer { withExtendedLifetime(operationLock) {} }
-        await stageChanged(.preparing, "正在解包并检查 IPA…")
+        await stageChanged(.preparing, L10n.tr("正在解包并检查 IPA…"))
         guard ipa.pathExtension.lowercased() == "ipa" else {
-            throw AutoSignError.invalidIPA("请选择 `.ipa` 文件；iOS 应用安装包不是 `.ipk`。")
+            throw AutoSignError.invalidIPA(L10n.tr("请选择 `.ipa` 文件；iOS 应用安装包不是 `.ipk`。"))
         }
-        guard device.isConnected else { throw AutoSignError.missingSelection("目标设备当前未连接。") }
+        guard device.isConnected else { throw AutoSignError.missingSelection(L10n.tr("目标设备当前未连接。")) }
         guard device.developerModeEnabled else {
-            throw AutoSignError.missingSelection("请先在设备的“设置 → 隐私与安全性 → 开发者模式”中开启开发者模式，然后重启设备。")
+            throw AutoSignError.missingSelection(L10n.tr("请先在设备的“设置 → 隐私与安全性 → 开发者模式”中开启开发者模式，然后重启设备。"))
         }
 
         let profile = try await readProfile(at: profileURL)
-        guard !profile.isExpired else { throw AutoSignError.invalidProfile("描述文件已过期：\(profile.name)") }
+        guard !profile.isExpired else { throw AutoSignError.invalidProfile(L10n.tr("描述文件已过期：\(profile.name)")) }
         guard profile.provisionsAllDevices || profile.provisionedDevices.contains(device.udid) else {
             if profile.provisionedDevices.isEmpty {
-                throw AutoSignError.incompatibleProfile("这是 App Store 描述文件，不能直接安装到设备。请选择开发、Ad Hoc 或企业描述文件。")
+                throw AutoSignError.incompatibleProfile(L10n.tr("这是 App Store 描述文件，不能直接安装到设备。请选择开发、Ad Hoc 或企业描述文件。"))
             }
-            throw AutoSignError.incompatibleProfile("描述文件不包含所选设备的 UDID（\(device.udid)）。")
+            throw AutoSignError.incompatibleProfile(L10n.tr("描述文件不包含所选设备的 UDID（\(device.udid)）。"))
         }
 
         let work = FileManager.default.temporaryDirectory.appendingPathComponent("AutoSign-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: work, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: work) }
         _ = try await ProcessRunner.checked(
-            "/usr/bin/ditto", ["-x", "-k", ipa.path, work.path], context: "IPA 解包失败。"
+            "/usr/bin/ditto", ["-x", "-k", ipa.path, work.path], context: L10n.tr("IPA 解包失败。")
         )
 
         let payload = work.appendingPathComponent("Payload")
         let appURLs = try FileManager.default.contentsOfDirectory(at: payload, includingPropertiesForKeys: nil)
             .filter { $0.pathExtension.lowercased() == "app" }
         guard appURLs.count == 1, let app = appURLs.first else {
-            throw AutoSignError.invalidIPA("IPA 必须在 Payload 中包含且只包含一个 `.app`。")
+            throw AutoSignError.invalidIPA(L10n.tr("IPA 必须在 Payload 中包含且只包含一个 `.app`。"))
         }
 
         var mainBundleID = try bundleIdentifier(at: app)
         let originalBundleID = mainBundleID
         if let expectedBundleIdentifier, mainBundleID != expectedBundleIdentifier {
-            throw AutoSignError.invalidIPA("下载的 IPA 应用标识与源记录不一致，已停止安装。")
+            throw AutoSignError.invalidIPA(L10n.tr("下载的 IPA 应用标识与源记录不一致，已停止安装。"))
         }
         if let installedBundleIdentifier, installedBundleIdentifier != mainBundleID {
             guard profileSupports(profile.applicationIdentifier, bundleID: installedBundleIdentifier) else {
-                throw AutoSignError.incompatibleProfile("描述文件不支持原应用标识，已停止覆盖安装。")
+                throw AutoSignError.incompatibleProfile(L10n.tr("描述文件不支持原应用标识，已停止覆盖安装。"))
             }
             try replaceBundleIdentifier(at: app, with: installedBundleIdentifier)
             mainBundleID = installedBundleIdentifier
         }
         if expectedBundleIdentifier != nil, !profileSupports(profile.applicationIdentifier, bundleID: mainBundleID) {
-            throw AutoSignError.incompatibleProfile("描述文件与应用标识不匹配，已停止安装。")
+            throw AutoSignError.incompatibleProfile(L10n.tr("描述文件与应用标识不匹配，已停止安装。"))
         }
         if !profileSupports(profile.applicationIdentifier, bundleID: mainBundleID) {
             guard let replacement = explicitBundleIdentifier(from: profile.applicationIdentifier) else {
                 throw AutoSignError.incompatibleProfile(
-                    "描述文件对应 \(profile.applicationIdentifier)，但应用标识是 \(mainBundleID)。请创建匹配的描述文件。"
+                    L10n.tr("描述文件对应 \(profile.applicationIdentifier)，但应用标识是 \(mainBundleID)。请创建匹配的描述文件。")
                 )
             }
             try replaceBundleIdentifier(at: app, with: replacement)
             mainBundleID = replacement
         }
 
-        await stageChanged(.signing, "正在签名框架与应用主体…")
+        await stageChanged(.signing, L10n.tr("正在签名框架与应用主体…"))
         try FileManager.default.copyItemReplacing(profileURL, to: app.appendingPathComponent("embedded.mobileprovision"))
         let allFiles = FileManager.default.enumerator(at: app, includingPropertiesForKeys: nil)?.allObjects as? [URL] ?? []
         let libraries = allFiles.filter { $0.pathExtension == "framework" || $0.pathExtension == "dylib" }
@@ -280,7 +281,7 @@ enum SigningService {
         for bundle in nestedBundles {
             let bundleID = try bundleIdentifier(at: bundle)
             guard profileSupports(profile.applicationIdentifier, bundleID: bundleID) else {
-                throw AutoSignError.incompatibleProfile("描述文件不支持扩展 \(bundleID)。建议使用通配符开发描述文件。")
+                throw AutoSignError.incompatibleProfile(L10n.tr("描述文件不支持扩展 \(bundleID)。建议使用通配符开发描述文件。"))
             }
             try FileManager.default.copyItemReplacing(profileURL, to: bundle.appendingPathComponent("embedded.mobileprovision"))
             let entitlementsURL = try writeEntitlements(profile.entitlements, bundleID: bundleID, in: work)
@@ -290,7 +291,7 @@ enum SigningService {
         let entitlementsURL = try writeEntitlements(profile.entitlements, bundleID: mainBundleID, in: work)
         try await codesign(app, identity: identity, entitlementsURL: entitlementsURL)
         _ = try await ProcessRunner.checked(
-            "/usr/bin/codesign", ["--verify", "--deep", "--strict", app.path], context: "签名验证失败。"
+            "/usr/bin/codesign", ["--verify", "--deep", "--strict", app.path], context: L10n.tr("签名验证失败。")
         )
 
         let output = outputIPA ?? uniqueOutputURL(for: ipa)
@@ -300,18 +301,18 @@ enum SigningService {
         }
         _ = try await ProcessRunner.checked(
             "/usr/bin/ditto", ["-c", "-k", "--sequesterRsrc", "--keepParent", payload.path, output.path],
-            context: "无法生成签名后的 IPA。"
+            context: L10n.tr("无法生成签名后的 IPA。")
         )
 
-        await stageChanged(.installing, "正在将应用安装到 \(device.name)…")
+        await stageChanged(.installing, L10n.tr("正在将应用安装到 \(device.name)…"))
         _ = try await ProcessRunner.checked(
             "/usr/bin/xcrun",
             ["devicectl", "device", "install", "app", "--device", device.udid, app.path, "--timeout", "180"],
-            context: "设备安装失败。"
+            context: L10n.tr("设备安装失败。")
         )
         if let verification = refreshVerification {
             await stageChanged(.installing, verification.verifyLaunch
-                ? "已安装，正在验证描述文件和应用启动…" : "已安装，正在验证描述文件…")
+                ? L10n.tr("已安装，正在验证描述文件和应用启动…") : L10n.tr("已安装，正在验证描述文件…"))
             try await verification.verify(profile: {
                 do { try await DeviceProfileService.verify(profileURL, on: device) }
                 catch ProfileRefreshError.unsupported {
@@ -319,8 +320,8 @@ enum SigningService {
                     // package and successful install, plus launch if enabled.
                     // A missing profile on a supported device remains a failure.
                     await stageChanged(.installing, verification.verifyLaunch
-                        ? "设备不支持读回描述文件，正在验证已签名安装包的启动…"
-                        : "设备不支持读回描述文件，已确认签名包与安装结果")
+                        ? L10n.tr("设备不支持读回描述文件，正在验证已签名安装包的启动…")
+                        : L10n.tr("设备不支持读回描述文件，已确认签名包与安装结果"))
                 }
             }, launch: {
                 try await DeviceAppVerification.verifyLaunch(mainBundleID, on: device)
@@ -360,7 +361,7 @@ enum SigningService {
         let data = try Data(contentsOf: plist)
         guard let raw = try PropertyListSerialization.propertyList(from: data, options: [], format: nil) as? [String: Any],
               let identifier = raw["CFBundleIdentifier"] as? String, !identifier.isEmpty else {
-            throw AutoSignError.invalidIPA("无法读取 \(bundle.lastPathComponent) 的应用标识。")
+            throw AutoSignError.invalidIPA(L10n.tr("无法读取 \(bundle.lastPathComponent) 的应用标识。"))
         }
         return identifier
     }
@@ -373,14 +374,14 @@ enum SigningService {
         let development = URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
             .appendingPathComponent("ProvisioningHelper/ProvisioningHelper.xcodeproj")
         if FileManager.default.fileExists(atPath: development.path) { return development }
-        throw AutoSignError.command("AutoSign 应用包中缺少自动续期组件，请重新构建或下载完整版本。")
+        throw AutoSignError.command(L10n.tr("AutoSign 应用包中缺少自动续期组件，请重新构建或下载完整版本。"))
     }
 
     private static func replaceBundleIdentifier(at bundle: URL, with identifier: String) throws {
         let plist = bundle.appendingPathComponent("Info.plist")
         let data = try Data(contentsOf: plist)
         guard var raw = try PropertyListSerialization.propertyList(from: data, options: [], format: nil) as? [String: Any] else {
-            throw AutoSignError.invalidIPA("无法修改 \(bundle.lastPathComponent) 的应用标识。")
+            throw AutoSignError.invalidIPA(L10n.tr("无法修改 \(bundle.lastPathComponent) 的应用标识。"))
         }
         raw["CFBundleIdentifier"] = identifier
         let updated = try PropertyListSerialization.data(fromPropertyList: raw, format: .binary, options: 0)
@@ -411,7 +412,7 @@ enum SigningService {
         var arguments = ["--force", "--sign", identity.hash, "--timestamp=none"]
         if let entitlementsURL { arguments += ["--entitlements", entitlementsURL.path] }
         arguments.append(url.path)
-        _ = try await ProcessRunner.checked("/usr/bin/codesign", arguments, context: "签名失败：\(url.lastPathComponent)")
+        _ = try await ProcessRunner.checked("/usr/bin/codesign", arguments, context: L10n.tr("签名失败：\(url.lastPathComponent)"))
     }
 
     private static func uniqueOutputURL(for ipa: URL) -> URL {

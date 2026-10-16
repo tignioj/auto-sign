@@ -1,3 +1,4 @@
+import AutoSignLocalization
 import Darwin
 import Foundation
 
@@ -35,7 +36,7 @@ enum StoreLibrary {
         let data = try Data(contentsOf: bundle.appendingPathComponent("Info.plist"))
         guard let info = try PropertyListSerialization.propertyList(from: data, format: nil) as? [String: Any],
               let bundleID = info["CFBundleIdentifier"] as? String else {
-            throw AutoSignError.invalidIPA("无法记录应用标识。")
+            throw AutoSignError.invalidIPA(L10n.tr("无法记录应用标识。"))
         }
         try withLock {
             var records = try readUnlocked()
@@ -69,7 +70,7 @@ enum StoreLibrary {
             guard let index = records.firstIndex(where: { $0.app.id == previous.app.id }),
                   records[index].app.refreshedAt == previous.app.refreshedAt,
                   records[index].identityID == previous.identityID else {
-                throw AutoSignError.command("原应用记录已变化，请重新同步后再续签。")
+                throw AutoSignError.command(L10n.tr("原应用记录已变化，请重新同步后再续签。"))
             }
             let app = records[index].app
             try copyIfDifferent(profileURL, to: URL(fileURLWithPath: records[index].profilePath))
@@ -102,9 +103,9 @@ enum StoreLibrary {
 
     private static func withLock<T>(_ body: () throws -> T) throws -> T {
         let descriptor = open(try directory().appendingPathComponent("library.lock").path, O_CREAT | O_RDWR, 0o600)
-        guard descriptor >= 0 else { throw AutoSignError.command("无法打开应用库锁。") }
+        guard descriptor >= 0 else { throw AutoSignError.command(L10n.tr("无法打开应用库锁。")) }
         defer { close(descriptor) }
-        guard flock(descriptor, LOCK_EX) == 0 else { throw AutoSignError.command("无法锁定应用库。") }
+        guard flock(descriptor, LOCK_EX) == 0 else { throw AutoSignError.command(L10n.tr("无法锁定应用库。")) }
         defer { flock(descriptor, LOCK_UN) }
         return try body()
     }
@@ -115,10 +116,10 @@ final class SigningOperationLock: @unchecked Sendable {
     private let descriptor: Int32
     init() throws {
         let opened = open(try StoreLibrary.directory().appendingPathComponent("signing.lock").path, O_CREAT | O_RDWR, 0o600)
-        guard opened >= 0 else { throw AutoSignError.command("无法打开签名锁。") }
+        guard opened >= 0 else { throw AutoSignError.command(L10n.tr("无法打开签名锁。")) }
         guard flock(opened, LOCK_EX | LOCK_NB) == 0 else {
             close(opened)
-            throw AutoSignError.command("Mac 正在执行另一个签名任务，请稍后重试。")
+            throw AutoSignError.command(L10n.tr("Mac 正在执行另一个签名任务，请稍后重试。"))
         }
         descriptor = opened
     }

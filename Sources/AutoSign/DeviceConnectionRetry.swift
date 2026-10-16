@@ -10,6 +10,8 @@ enum DeviceConnectionRetry {
         return ["kamdmuxconnecterror", "kamdnotconnectederror", "kamdconnectionfailederror", "kamddevicedisconnectederror",
                 "failed to allocate rsd device", "device disconnected immediately after connecting",
                 "connection reset by peer", "connection refused", "broken pipe",
+                "coredevice connection failed", "coredevice connection interrupted",
+                "coredevice discovery connection was reset", "no paired coredevice provisioning profile channel",
                 "coredevice 连接失败", "coredevice 连接中断或读取超时", "coredevice 连接中断或写入超时",
                 "coredevice 发现连接被重置", "未找到此设备已配对的 coredevice 描述文件通道"]
             .contains(where: text.contains)

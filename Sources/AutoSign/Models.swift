@@ -1,3 +1,4 @@
+import AutoSignLocalization
 import Foundation
 
 enum DeviceKind: String, CaseIterable, Identifiable, Sendable {
@@ -21,10 +22,10 @@ struct AppleDevice: Identifiable, Hashable, Sendable {
     let isConnected: Bool
 
     var statusText: String {
-        if !isPaired { return "需与这台 Mac 配对" }
-        if !isConnected { return "设备未连接" }
-        if !developerModeEnabled { return "需开启开发者模式" }
-        return "已连接，可安装"
+        if !isPaired { return L10n.tr("需与这台 Mac 配对") }
+        if !isConnected { return L10n.tr("设备未连接") }
+        if !developerModeEnabled { return L10n.tr("需开启开发者模式") }
+        return L10n.tr("已连接，可安装")
     }
 
     var isReadyForInstallation: Bool {
@@ -123,12 +124,12 @@ enum InstallStage: Equatable, Sendable {
 
     var title: String {
         switch self {
-        case .idle: "准备就绪"
-        case .preparing: "正在处理应用…"
-        case .signing: "正在签名…"
-        case .installing: "正在安装到设备…"
-        case .finished: "处理完成"
-        case .failed: "操作未完成"
+        case .idle: L10n.tr("准备就绪")
+        case .preparing: L10n.tr("正在处理应用…")
+        case .signing: L10n.tr("正在签名…")
+        case .installing: L10n.tr("正在安装到设备…")
+        case .finished: L10n.tr("处理完成")
+        case .failed: L10n.tr("操作未完成")
         }
     }
 

@@ -1,3 +1,4 @@
+import AutoSignLocalization
 import AppKit
 import CryptoKit
 import Foundation
@@ -30,12 +31,12 @@ final class LocalNetworkAccess: ObservableObject {
 
         var detail: String {
             switch self {
-            case .notChecked: "无线续签需要本地网络权限，请先在这里完成检查。"
-            case .checking: "正在检查本地网络访问。如果系统弹出 AutoSign 权限提示，请选择“允许”。"
-            case .ready: "本地网络访问检查通过，可以设置后台自动续签。"
-            case .needsPermission: "尚未获得本地网络访问权限。请在系统设置 → 隐私与安全性 → 本地网络中允许 AutoSign，然后重新检查。"
-            case .unavailable: "暂时无法确认本地网络访问，请连接 Wi-Fi 或有线局域网后重新检查。"
-            case .cancelled: "检查已取消。开启后台自动续签前需要完成本地网络检查。"
+            case .notChecked: L10n.tr("无线续签需要本地网络权限，请先在这里完成检查。")
+            case .checking: L10n.tr("正在检查本地网络访问。如果系统弹出 AutoSign 权限提示，请选择“允许”。")
+            case .ready: L10n.tr("本地网络访问检查通过，可以设置后台自动续签。")
+            case .needsPermission: L10n.tr("尚未获得本地网络访问权限。请在系统设置 → 隐私与安全性 → 本地网络中允许 AutoSign，然后重新检查。")
+            case .unavailable: L10n.tr("暂时无法确认本地网络访问，请连接 Wi-Fi 或有线局域网后重新检查。")
+            case .cancelled: L10n.tr("检查已取消。开启后台自动续签前需要完成本地网络检查。")
             }
         }
     }

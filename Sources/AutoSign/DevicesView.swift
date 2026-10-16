@@ -1,22 +1,26 @@
+import AutoSignLocalization
 import SwiftUI
 
 struct DevicesView: View {
+    @Environment(\.locale) private var locale
     @ObservedObject var model: AppModel
     let onInstall: () -> Void
     let onHelp: () -> Void
 
     var body: some View {
+        // Recompute String-based translations when the app language changes.
+        let _ = locale
         VStack(spacing: 20) {
             deviceSection
-            AppCard(title: "连接与配对", symbol: "link") {
-                Text("首次使用请通过 USB 连接、解锁设备并信任此 Mac。无线使用前，请在 Finder 中启用“连接到 Wi-Fi 时显示此设备”。")
+            AppCard(title: L10n.tr("连接与配对"), symbol: "link") {
+                Text(L10n.tr("首次使用请通过 USB 连接、解锁设备并信任此 Mac。无线使用前，请在 Finder 中启用“连接到 Wi-Fi 时显示此设备”。"))
                     .font(.callout).foregroundStyle(.secondary)
-                Text("切换目标设备会清空本次应用选择，已安装应用的自动续签记录会保留。")
+                Text(L10n.tr("切换目标设备会清空本次应用选择，已安装应用的自动续签记录会保留。"))
                     .font(.caption).foregroundStyle(.secondary)
                 HStack {
-                    Button("查看使用指南", action: onHelp)
+                    Button(L10n.tr("查看使用指南"), action: onHelp)
                     Spacer()
-                    Button("为此设备安装应用", action: onInstall)
+                    Button(L10n.tr("为此设备安装应用"), action: onInstall)
                         .buttonStyle(.borderedProminent).tint(.cyan)
                         .disabled(model.selectedDevice?.isReadyForInstallation != true)
                 }
@@ -25,10 +29,10 @@ struct DevicesView: View {
     }
 
     private var deviceSection: some View {
-        AppCard(title: "目标设备", symbol: "cable.connector") {
+        AppCard(title: L10n.tr("目标设备"), symbol: "cable.connector") {
             VStack(spacing: 16) {
                 HStack {
-                    Picker("设备类型", selection: Binding(get: { model.deviceKind }, set: { model.changeKind($0) })) {
+                    Picker(L10n.tr("设备类型"), selection: Binding(get: { model.deviceKind }, set: { model.changeKind($0) })) {
                         ForEach(DeviceKind.allCases) { kind in
                             Label(kind.title, systemImage: kind.symbol).tag(kind)
                         }
@@ -37,17 +41,17 @@ struct DevicesView: View {
                     .frame(maxWidth: 340)
                     .disabled(model.isBusy)
                     Spacer()
-                    Text(model.selectedDevice.map { "当前设备：" + $0.name } ?? "请选择一台设备")
+                    Text(model.selectedDevice.map { L10n.tr("当前设备：") + $0.name } ?? L10n.tr("请选择一台设备"))
                         .font(.caption)
                         .foregroundStyle(model.selectedDevice == nil ? .orange : .secondary)
                     Button { Task { await model.refresh() } } label: {
-                        Label("刷新", systemImage: "arrow.clockwise")
+                        Label(L10n.tr("刷新"), systemImage: "arrow.clockwise")
                     }
                     .disabled(model.isRefreshing || model.isBusy)
                 }
 
                 if model.filteredDevices.isEmpty {
-                    emptyRow(symbol: model.deviceKind.symbol, text: "没有发现 \(model.deviceKind.title)，请连接 USB 并解锁设备")
+                    emptyRow(symbol: model.deviceKind.symbol, text: L10n.tr("没有发现 \(model.deviceKind.title)，请连接 USB 并解锁设备"))
                 } else {
                     ScrollView(.horizontal, showsIndicators: false) {
                         HStack(spacing: 12) {
@@ -62,7 +66,7 @@ struct DevicesView: View {
                                                 } else {
                                                     Image(systemName: "link")
                                                 }
-                                                Text(model.pairingDeviceID == device.id ? "正在配对…" : "发起配对")
+                                                Text(model.pairingDeviceID == device.id ? L10n.tr("正在配对…") : L10n.tr("发起配对"))
                                             }
                                             .frame(maxWidth: .infinity)
                                         }
@@ -97,9 +101,9 @@ struct DevicesView: View {
                 .background(Color.orange.opacity(0.14), in: Circle())
 
             VStack(alignment: .leading, spacing: 4) {
-                Text("请在 \(devicesRequiringDeveloperMode.count) 台设备上开启开发者模式")
+                Text(L10n.tr("请在 \(devicesRequiringDeveloperMode.count) 台设备上开启开发者模式"))
                     .font(.callout.weight(.semibold))
-                Text("前往“设置 → 隐私与安全性 → 开发者模式”，开启后按提示重启设备，再返回这里刷新。")
+                Text(L10n.tr("前往“设置 → 隐私与安全性 → 开发者模式”，开启后按提示重启设备，再返回这里刷新。"))
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)

@@ -1,3 +1,4 @@
+import AutoSignLocalization
 import Foundation
 import Testing
 @testable import AutoSign
@@ -18,7 +19,7 @@ import Testing
     let device = try #require(DeviceService.parseDevices(from: Data(json.utf8)).first)
     #expect(!device.isPaired)
     #expect(!device.isConnected)
-    #expect(device.statusText == "需与这台 Mac 配对")
+    #expect(device.statusText == L10n.tr("需与这台 Mac 配对"))
 }
 
 @Test func activeProbeRecognizesReachableWiFiDevice() throws {
@@ -149,11 +150,11 @@ import Testing
     let now = Date(timeIntervalSince1970: 1_000_000)
     let check = now.addingTimeInterval(1_800)
     let status = RefreshStatus(id: "one", name: "iPhone", expiration: now.addingTimeInterval(7 * 86_400))
-    #expect(status.nextAttempt(check: check, enabled: false, now: now) == "自动续签已关闭")
-    #expect(status.nextAttempt(check: nil, enabled: true, now: now) == "等待首次后台检查")
-    #expect(status.nextAttempt(check: now.addingTimeInterval(-1), enabled: true, now: now).contains("检查时间已到"))
-    #expect(status.nextAttempt(check: check, enabled: true, now: now).contains(now.addingTimeInterval(6 * 86_400).formatted(date: .abbreviated, time: .shortened)))
-    #expect(RefreshStatusStore.failureSummary("error: No Accounts: Add a new account").contains("Xcode 未读取到可用账号"))
+    #expect(status.nextAttempt(check: check, enabled: false, now: now) == L10n.tr("自动续签已关闭"))
+    #expect(status.nextAttempt(check: nil, enabled: true, now: now) == L10n.tr("等待首次后台检查"))
+    #expect(status.nextAttempt(check: now.addingTimeInterval(-1), enabled: true, now: now).contains((AppLanguage.current == .english ? "Check is due" : "检查时间已到")))
+    #expect(status.nextAttempt(check: check, enabled: true, now: now).contains(L10n.date(now.addingTimeInterval(6 * 86_400))))
+    #expect(RefreshStatusStore.failureSummary("error: No Accounts: Add a new account").contains((AppLanguage.current == .english ? "Xcode could not read an available account" : "Xcode 未读取到可用账号")))
 }
 
 @Test func devicePreparationRetriesOnceAndCanRecover() async throws {
@@ -178,7 +179,7 @@ import Testing
         } beforeRetry: {}
         Issue.record("Expected retry failure")
     } catch {
-        #expect(error.localizedDescription.contains("已自动重试 1 次"))
+        #expect(error.localizedDescription.contains((AppLanguage.current == .english ? "Retried once" : "已自动重试 1 次")))
         #expect(error.localizedDescription.contains("Timed out waiting"))
     }
     #expect(attempts == 2)

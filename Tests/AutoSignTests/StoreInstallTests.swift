@@ -1,3 +1,4 @@
+import AutoSignLocalization
 import Foundation
 import Testing
 @testable import AutoSign
@@ -50,7 +51,7 @@ private func savedInstallSource(_ url: String = "https://source.test/apps.json")
     let recovered = try #require(StoreJobPlanner.recoverInterrupted(restored).first)
     #expect(recovered.installRequest == input)
     #expect(recovered.state == .failed)
-    #expect(recovered.items[0].message.contains("Mac 服务曾退出"))
+    #expect(recovered.items[0].message.contains((AppLanguage.current == .english ? "The Mac service stopped" : "Mac 服务曾退出")))
     #expect(try StoreJobPlanner.existingInstall(input, jobs: [recovered])?.id == job.id)
 }
 

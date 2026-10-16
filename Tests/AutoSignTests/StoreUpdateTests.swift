@@ -1,3 +1,4 @@
+import AutoSignLocalization
 import Foundation
 import Testing
 @testable import AutoSign
@@ -280,7 +281,7 @@ private final class UpdateSourceProtocol: URLProtocol, @unchecked Sendable {
     let job = try await harness.server.submitUpdates(RefreshRequest(requestID: UUID().uuidString, deviceUDID: "phone", appIDs: ["demo"]))
     let result = try await harness.finish(job.id)
     #expect(result.state == .completed)
-    #expect(result.items[0].message.contains("无需更新"))
+    #expect(result.items[0].message.contains((AppLanguage.current == .english ? "No update needed" : "无需更新")))
     #expect(harness.installed.isEmpty)
 }
 

@@ -1,3 +1,4 @@
+import AutoSignLocalization
 import Foundation
 import Testing
 @testable import AutoSign
@@ -33,8 +34,8 @@ func renewalVerificationRespectsLaunchOption(verifyLaunch: Bool, reinstall: Bool
         })
     #expect(result.method == (reinstall ? .reinstalled : .profileOnly))
     #expect(events == [reinstall ? "reinstalled" : "profile-installed", "profile-verified"] + (verifyLaunch ? ["launch"] : []))
-    #expect(result.message.contains(verifyLaunch ? "启动验证通过" : "已跳过启动验证"))
-    #expect(result.message.contains("启动验证通过") == verifyLaunch)
+    #expect(result.message.contains(verifyLaunch ? L10n.tr("启动验证通过") : L10n.tr("已跳过启动验证")))
+    #expect(result.message.contains(L10n.tr("启动验证通过")) == verifyLaunch)
 }
 
 @Test(arguments: [false, true])

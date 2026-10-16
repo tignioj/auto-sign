@@ -1,3 +1,4 @@
+import AutoSignLocalization
 import Foundation
 
 struct RefreshVerificationOptions: Sendable {
@@ -10,7 +11,7 @@ struct RefreshVerificationOptions: Sendable {
     }
 
     var completionMessage: String {
-        verifyLaunch ? "启动验证通过" : "已跳过启动验证"
+        verifyLaunch ? L10n.tr("启动验证通过") : L10n.tr("已跳过启动验证")
     }
 
     /// Profile verification remains mandatory even when the user skips launching.

@@ -1,3 +1,4 @@
+import AutoSignLocalization
 import Foundation
 import CryptoKit
 import Security
@@ -19,7 +20,7 @@ enum IndependentProvisioningService {
         do { teams = try await AltAppleBridge.teams(account: account, session: session) }
         catch {
             guard sessionExpired(error) else { throw error }
-            statusChanged("Apple 登录会话已到期，正在使用系统钥匙串中的凭据重新登录…")
+            statusChanged(L10n.tr("Apple 登录会话已到期，正在使用系统钥匙串中的凭据重新登录…"))
             do {
                 (account, session) = try await IndependentAccountModel.shared.authenticate(email: credentials.email,
                     password: credentials.password, anisette: anisette, interactive: false)
@@ -41,7 +42,7 @@ enum IndependentProvisioningService {
         guard let team = teams.first(where: { $0.identifier == original.teamIdentifier }) else {
             throw IndependentAccountError.teamMismatch
         }
-        statusChanged("正在通过 AutoSign 独立账号为 \(bundleID) 签发描述文件…")
+        statusChanged(L10n.tr("正在通过 AutoSign 独立账号为 \(bundleID) 签发描述文件…"))
         let api = ALTAppleAPI.shared
         let type: ALTDeviceType = device.kind == .iPad ? .ipad : .iphone
         let registered: [ALTDevice] = try await AltAppleBridge.value {
@@ -60,7 +61,7 @@ enum IndependentProvisioningService {
             guard let data = certificate.data, let hash = certificateHash(data) else { return false }
             return original.signingCertificateHashes.contains(hash)
         }) || original.signingCertificateHashes.isEmpty else {
-            throw AutoSignError.command("Apple 账号中未找到此应用原有签名证书。已停止续签且未撤销其他证书，请在签名设置检查原团队的证书。")
+            throw AutoSignError.command(L10n.tr("Apple 账号中未找到此应用原有签名证书。已停止续签且未撤销其他证书，请在签名设置检查原团队的证书。"))
         }
         if original.signingCertificateHashes.isEmpty {
             try await ensureCertificate(certificates, team: team, session: session, statusChanged: statusChanged)
@@ -131,7 +132,7 @@ enum IndependentProvisioningService {
               let team = account.summary?.teams.first(where: { $0.id == account.selectedTeamID }) else {
             throw IndependentAccountError.signInRequired
         }
-        return ProvisioningProfile(name: "AutoSign 独立账号", uuid: "native-seed", expirationDate: .distantPast,
+        return ProvisioningProfile(name: L10n.tr("AutoSign 独立账号"), uuid: "native-seed", expirationDate: .distantPast,
             applicationIdentifier: team.id + ".*", teamIdentifier: team.id, provisionedDevices: [],
             provisionsAllDevices: false, entitlements: [:], timeToLiveDays: team.isFree ? 7 : nil)
     }
@@ -146,7 +147,7 @@ enum IndependentProvisioningService {
                                           statusChanged: @escaping @MainActor @Sendable (String) -> Void) async throws {
         let local = try await SigningService.identities()
         if reusableIdentity(certificates: certificates, identities: local) != nil {
-            statusChanged("正在复用本机已有开发证书，不申请新证书…")
+            statusChanged(L10n.tr("正在复用本机已有开发证书，不申请新证书…"))
             return
         }
         // Recover only this app's private key. Never revoke a certificate to make room.
@@ -155,7 +156,7 @@ enum IndependentProvisioningService {
             try importCertificate(p12)
             let recovered = try await SigningService.identities()
             if reusableIdentity(certificates: certificates, identities: recovered) != nil {
-                statusChanged("已恢复并复用 AutoSign 保存的开发证书…")
+                statusChanged(L10n.tr("已恢复并复用 AutoSign 保存的开发证书…"))
                 return
             }
         }
@@ -166,7 +167,7 @@ enum IndependentProvisioningService {
             }
         } catch {
             guard IndependentAccountModel.appleErrorCode(error) == 7460 else { throw error }
-            throw AutoSignError.command("Apple 拒绝创建开发证书（7460）：此团队已有开发证书或待处理申请，但本机未找到匹配的可用私钥。请从原签名 Mac 导入包含私钥的 .p12 后刷新本机证书；现有证书未被撤销。")
+            throw AutoSignError.command(L10n.tr("Apple 拒绝创建开发证书（7460）：此团队已有开发证书或待处理申请，但本机未找到匹配的可用私钥。请从原签名 Mac 导入包含私钥的 .p12 后刷新本机证书；现有证书未被撤销。"))
         }
         guard let p12 = certificate.p12Data() else { throw IndependentAccountError.invalidResponse }
         // Save the issued key before import so an interrupted setup can recover it.
@@ -203,7 +204,7 @@ enum IndependentProvisioningService {
             trusted.append(app)
         }
         var access: SecAccess?
-        let accessStatus = SecAccessCreate("AutoSign 签名证书" as CFString, trusted as CFArray, &access)
+        let accessStatus = SecAccessCreate(L10n.tr("AutoSign 签名证书") as CFString, trusted as CFArray, &access)
         guard accessStatus == errSecSuccess, let access else { throw AppleAccountStore.failure(accessStatus) }
         let options: [String: Any] = [kSecImportExportPassphrase as String: "",
                                      kSecImportExportKeychain as String: keychain,

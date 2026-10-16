@@ -1,6 +1,9 @@
+import AutoSignLocalization
 import SwiftUI
 
 struct ContentView: View {
+    @Environment(\.locale) private var locale
+    @AppStorage(AppLanguage.preferenceKey) private var language = AppLanguage.system.rawValue
     @ObservedObject var model: AppModel
     @ObservedObject private var sourceLibrary: SourceLibraryModel
     @State private var selectedPage: AppPage = .install
@@ -15,6 +18,8 @@ struct ContentView: View {
     }
 
     var body: some View {
+        // Recompute String-based translations when the app language changes.
+        let _ = locale
         ZStack {
             LinearGradient(
                 colors: [Color(red: 0.055, green: 0.075, blue: 0.14), Color(red: 0.09, green: 0.07, blue: 0.19)],
@@ -52,6 +57,9 @@ struct ContentView: View {
         .onChange(of: localNetwork.state) { _, state in
             if state == .ready { Task { await resumeNetworkFeatures() } }
         }
+        .onChange(of: language) { _, _ in
+            Task { await model.refreshDashboard() }
+        }
         .task {
             while !Task.isCancelled {
                 await model.refreshDashboard()
@@ -80,7 +88,7 @@ struct ContentView: View {
         defer { isResumingNetworkFeatures = false }
         if BackgroundRefreshManager.needsMigration {
             do { try await BackgroundRefreshManager.install() }
-            catch { model.lastBackgroundStatus = "更新后台任务失败：\(error.localizedDescription)" }
+            catch { model.lastBackgroundStatus = L10n.tr("更新后台任务失败：\(error.localizedDescription)") }
         }
         StoreServer.shared.startIfEnabled()
     }
@@ -96,12 +104,20 @@ struct ContentView: View {
 
             ScrollView {
                 VStack(alignment: .leading, spacing: 24) {
-                    navigationGroup("应用与设备", pages: [.install, .sources, .devices])
-                    navigationGroup("服务与设置", pages: [.renewal, .connection, .signing])
-                    navigationGroup("帮助", pages: [.help])
+                    navigationGroup(L10n.tr("应用与设备"), pages: [.install, .sources, .devices])
+                    navigationGroup(L10n.tr("服务与设置"), pages: [.renewal, .connection, .signing])
+                    navigationGroup(L10n.tr("帮助"), pages: [.help])
                 }
             }
             Spacer(minLength: 0)
+            Picker(L10n.tr("语言"), selection: $language) {
+                ForEach(AppLanguage.allCases) { option in
+                    Text(option.title).tag(option.rawValue)
+                }
+            }
+            .pickerStyle(.menu)
+            .font(.callout)
+            .help(L10n.tr("更改语言后立即生效，后台续签也会使用此语言。"))
             Button { selectedPage = .install } label: {
                 VStack(alignment: .leading, spacing: 8) {
                     HStack(spacing: 7) {
@@ -114,14 +130,14 @@ struct ContentView: View {
                         Spacer()
                         Image(systemName: "arrow.up.right").font(.caption)
                     }
-                    Text(model.detail).font(.caption).foregroundStyle(.secondary).lineLimit(2)
+                    Text(L10n.stored(model.detail)).font(.caption).foregroundStyle(.secondary).lineLimit(2)
                 }
                 .padding(12)
                 .background(.white.opacity(0.045), in: RoundedRectangle(cornerRadius: 12))
             }
-            .buttonStyle(.plain).help("查看安装与续签操作")
+            .buttonStyle(.plain).help(L10n.tr("查看安装与续签操作"))
         }
-        .padding(16).frame(width: 208)
+        .padding(16).frame(width: AppLanguage.current == .english ? 236 : 208)
         .frame(maxHeight: .infinity)
         .background(.black.opacity(0.12))
     }
@@ -137,7 +153,7 @@ struct ContentView: View {
                         Text(page.title).font(.callout.weight(selectedPage == page ? .semibold : .regular))
                         Spacer(minLength: 0)
                         if page == .install && !model.availableUpdates.isEmpty {
-                            Text("\(model.availableUpdates.count) 更新").font(.caption.weight(.medium))
+                            Text(L10n.tr("\(model.availableUpdates.count) 更新")).font(.caption.weight(.medium))
                                 .foregroundStyle(.orange)
                                 .padding(.horizontal, 6).padding(.vertical, 2)
                                 .background(.orange.opacity(0.12), in: Capsule())

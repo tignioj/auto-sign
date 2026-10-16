@@ -1,3 +1,4 @@
+import AutoSignLocalization
 import Foundation
 import Testing
 @testable import AutoSign
@@ -189,7 +190,7 @@ private func batchSession() -> URLSession {
         }), itemChanged: { _ in })
     #expect(refreshed == ["one", "two", "store"])
     #expect(results.map(\.state) == [.failed, .completed, .completed])
-    #expect(results.last?.message.contains("无需重装") == true)
+    #expect(results.last?.message.contains((AppLanguage.current == .english ? "without reinstalling" : "无需重装")) == true)
     #expect(library.sourceErrors.isEmpty)
     #expect(RefreshStatusStore.loadApp(records[0].app, preferences: preferences).failure == "设备锁定")
     #expect(RefreshStatusStore.loadApp(records[1].app, preferences: preferences).lastSuccess != nil)
@@ -233,8 +234,8 @@ private func batchSession() -> URLSession {
             }), itemChanged: { _ in })
     #expect(calls == 1)
     #expect(results.map(\.state) == [.failed, .failed])
-    #expect(results[0].message.contains("没有延长有效期"))
-    #expect(results[1].message.contains("请先安装"))
+    #expect(results[0].message.contains((AppLanguage.current == .english ? "does not extend validity" : "没有延长有效期")))
+    #expect(results[1].message.contains((AppLanguage.current == .english ? "Install it first" : "请先安装")))
     #expect(results.allSatisfy { $0.expiration == nil })
     #expect(RefreshStatusStore.loadApp(record.app, preferences: preferences).lastSuccess == nil)
 }

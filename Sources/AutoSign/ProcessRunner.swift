@@ -1,4 +1,5 @@
 import Foundation
+import AutoSignLocalization
 
 enum ProcessRunner {
     static func run(_ executable: String, _ arguments: [String]) async throws -> CommandResult {
@@ -15,6 +16,11 @@ enum ProcessRunner {
             let process = Process()
             process.executableURL = URL(fileURLWithPath: executable)
             process.arguments = arguments
+            if executable.hasSuffix("/AutoSignRemoteHelper") {
+                var environment = ProcessInfo.processInfo.environment
+                environment["AUTOSIGN_LANGUAGE"] = AppLanguage.current.rawValue
+                process.environment = environment
+            }
             process.standardOutput = handle
             process.standardError = handle
             try process.run()

@@ -1,3 +1,4 @@
+import AutoSignLocalization
 import Foundation
 
 enum DeviceService {
@@ -32,7 +33,7 @@ enum DeviceService {
         _ = try await ProcessRunner.checked(
             "/usr/bin/xcrun",
             ["devicectl", "list", "devices", "--json-output", jsonURL.path, "--quiet"],
-            context: "无法读取设备。请确认已安装 Xcode。"
+            context: L10n.tr("无法读取设备。请确认已安装 Xcode。")
         )
         return try parseDevices(from: Data(contentsOf: jsonURL))
     }
@@ -82,7 +83,7 @@ enum DeviceService {
             name: item.deviceProperties.name,
             marketingName: item.hardwareProperties.marketingName ?? item.hardwareProperties.productType ?? type.rawValue,
             kind: type,
-            osVersion: item.deviceProperties.osVersionNumber ?? "未知版本",
+            osVersion: item.deviceProperties.osVersionNumber ?? L10n.tr("未知版本"),
             isPaired: item.connectionProperties.pairingState == "paired"
                 || item.connectionProperties.tunnelState == "connected",
             developerModeEnabled: item.deviceProperties.developerModeStatus == "enabled",
@@ -101,7 +102,7 @@ enum DeviceService {
         _ = try await ProcessRunner.checked(
             "/usr/bin/xcrun",
             ["devicectl", "manage", "pair", "--device", device.id, "--timeout", "120"],
-            context: "无法与设备配对。请保持设备解锁并通过 USB 连接，然后在设备上确认信任。"
+            context: L10n.tr("无法与设备配对。请保持设备解锁并通过 USB 连接，然后在设备上确认信任。")
         )
     }
 }

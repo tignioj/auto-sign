@@ -1,3 +1,4 @@
+import AutoSignLocalization
 import Foundation
 import Security
 import Testing
@@ -40,9 +41,9 @@ import Testing
 
 @Test func lockedKeychainFailurePreservesCredentialsAndExplainsFirstLogin() {
     let message = AppleAccountStore.failure(errSecInteractionNotAllowed).localizedDescription
-    #expect(message.contains("重启后先登录一次 Mac"))
-    #expect(message.contains("不会因读取失败而删除"))
-    #expect(AppleAccountStore.failure(errSecMissingEntitlement).localizedDescription.contains("代码签名"))
+    #expect(message.contains((AppLanguage.current == .english ? "Log in to your Mac after restarting" : "重启后先登录一次 Mac")))
+    #expect(message.contains((AppLanguage.current == .english ? "will not be deleted because a read failed" : "不会因读取失败而删除")))
+    #expect(AppleAccountStore.failure(errSecMissingEntitlement).localizedDescription.contains((AppLanguage.current == .english ? "code signature" : "代码签名")))
 }
 
 @Test func windowsAnisetteRejectsInsecureOrCredentialBearingServiceURLs() {

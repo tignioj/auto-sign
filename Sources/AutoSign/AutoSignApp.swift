@@ -1,7 +1,9 @@
+import AutoSignLocalization
 import SwiftUI
 
 @main
 struct AutoSignApp: App {
+    @AppStorage(AppLanguage.preferenceKey) private var language = AppLanguage.system.rawValue
     private let launchMode: LaunchMode
     @StateObject private var model: AppModel
 
@@ -26,6 +28,7 @@ struct AutoSignApp: App {
         WindowGroup {
             if launchMode == .interface {
                 ContentView(model: model)
+                    .environment(\.locale, AppLanguage(rawValue: language)?.locale ?? L10n.locale)
                     .frame(minWidth: 860, minHeight: 680)
             } else {
                 BackgroundTaskView(mode: launchMode)
@@ -61,9 +64,9 @@ private struct BackgroundTaskView: View {
                     if LocalNetworkPreparation.isPrepared() {
                         await BackgroundRefreshCoordinator.run()
                     } else {
-                        let message = "此版本尚未在前台完成本地网络检查。请打开 AutoSign，允许本地网络访问并完成检查后再使用后台续签。"
+                        let message = L10n.tr("此版本尚未在前台完成本地网络检查。请打开 AutoSign，允许本地网络访问并完成检查后再使用后台续签。")
                         BackgroundRefreshManager.record(message)
-                        await BackgroundRefreshManager.notify(title: "AutoSign 需要完成首次设置", body: message)
+                        await BackgroundRefreshManager.notify(title: L10n.tr("AutoSign 需要完成首次设置"), body: message)
                     }
                 case .installBackgroundRefresh:
                     try? await BackgroundRefreshManager.install()

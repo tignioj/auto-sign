@@ -1,3 +1,4 @@
+import AutoSignLocalization
 import Foundation
 
 /// Temporarily removes only eligible profiles for this team/bundle, following Apple's automatic-signing guidance.
@@ -23,7 +24,7 @@ enum ProvisioningProfileCache {
                 guard cacheFolders.map(\.standardizedFileURL).contains(entry.original.deletingLastPathComponent().standardizedFileURL),
                       entry.original.pathExtension.lowercased() == "mobileprovision",
                       entry.backupName.range(of: #"^[0-9]+\.mobileprovision$"#, options: .regularExpression) != nil else {
-                    throw AutoSignError.command("描述文件缓存恢复记录无效，已保留备份供检查。")
+                    throw AutoSignError.command(L10n.tr("描述文件缓存恢复记录无效，已保留备份供检查。"))
                 }
                 let backup = directory.appendingPathComponent(entry.backupName)
                 if (!success || entry.sharedWildcard),
@@ -72,7 +73,7 @@ enum ProvisioningProfileCache {
             try JSONEncoder().encode(entries).write(to: directory.appendingPathComponent("manifest.json"), options: .atomic)
             for entry in entries {
                 guard FileManager.default.contentsEqual(atPath: entry.original.path, andPath: directory.appendingPathComponent(entry.backupName).path) else {
-                    throw AutoSignError.command("Xcode 的描述文件缓存正在变化，请稍后重试续签。")
+                    throw AutoSignError.command(L10n.tr("Xcode 的描述文件缓存正在变化，请稍后重试续签。"))
                 }
                 try FileManager.default.removeItem(at: entry.original)
             }

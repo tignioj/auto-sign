@@ -1,3 +1,4 @@
+import AutoSignLocalization
 import Foundation
 import Testing
 @testable import AutoSign
@@ -97,14 +98,14 @@ import Testing
     #expect(harness.calls.map(\.profilePath) == ["/saved/a/profile.mobileprovision", "/saved/b/profile.mobileprovision", "/saved/store/profile.mobileprovision"])
     #expect(harness.calls.map(\.identityID) == ["CERT-TEAM", "CERT-OTHER", "CERT-TEAM"])
     #expect(harness.options == [true, true, true])
-    #expect(try harness.status("fresh").state == "未到续签窗口")
+    #expect(try harness.status("fresh").state == L10n.tr("未到续签窗口"))
     #expect(try harness.status("a").lastSuccess != nil)
     #expect(RefreshStatusStore.load("tablet", preferences: harness.preferences) == nil)
     #expect(harness.preferences.string(forKey: "ipaPath") == "/unrelated/current.ipa")
     #expect(harness.preferences.string(forKey: "profilePath") == "/unrelated/current.mobileprovision")
     #expect(harness.preferences.string(forKey: "identityID") == "UNRELATED")
-    #expect(harness.logs.last?.contains("4 个应用") == true)
-    #expect(harness.notifications == ["AutoSign 自动续签成功"])
+    #expect(harness.logs.last?.contains((AppLanguage.current == .english ? "apps checked: 4" : "4 个应用")) == true)
+    #expect(harness.notifications == [L10n.tr("AutoSign 自动续签成功")])
 }
 
 @Test @MainActor func backgroundWindowIncludesExactBoundaryAndExpiredApps() async throws {
@@ -154,7 +155,7 @@ import Testing
     #expect(try harness.status("a").lastSuccess != nil)
     #expect(try harness.status("b").lastSuccess == siblingSuccess)
     #expect(RefreshStatusStore.load("phone", preferences: harness.preferences)?.failure == nil)
-    #expect(harness.notifications == ["AutoSign 自动续签部分完成", "AutoSign 自动续签成功"])
+    #expect(harness.notifications == [L10n.tr("AutoSign 自动续签部分完成"), L10n.tr("AutoSign 自动续签成功")])
 }
 
 @Test @MainActor func backgroundOfflineDeviceRetriesAllItsDueAppsWithoutRepeatingSuccessfulDevices() async throws {
@@ -165,7 +166,7 @@ import Testing
                        harness.record("tablet-b", device: "tablet"), harness.record("tablet-fresh", device: "tablet", remaining: 2 * 86_400)]
     await harness.run()
     #expect(harness.calls.map(\.app.id) == ["phone-app"])
-    #expect(try harness.status("tablet-a").state == "等待设备就绪")
+    #expect(try harness.status("tablet-a").state == L10n.tr("等待设备就绪"))
     #expect(try harness.status("tablet-b").lastSuccess == nil)
     #expect(try harness.status("tablet-fresh").failure == nil)
 
@@ -217,7 +218,7 @@ import Testing
     await harness.run()
     #expect(harness.calls.isEmpty)
     #expect(harness.deviceReads == 0)
-    #expect(RefreshStatusStore.load("phone", preferences: harness.preferences)?.state.contains("暂无应用记录") == true)
+    #expect(RefreshStatusStore.load("phone", preferences: harness.preferences)?.state.contains((AppLanguage.current == .english ? "No app records yet" : "暂无应用记录")) == true)
     #expect(harness.preferences.string(forKey: "ipaPath") == nil)
 }
 
@@ -254,13 +255,13 @@ import Testing
     harness.returnedExpiry = harness.records[0].app.expiration
     await harness.run()
     #expect(try harness.status("a").lastSuccess == nil)
-    #expect(try harness.status("a").failure?.contains("没有延长有效期") == true)
+    #expect(try harness.status("a").failure?.contains((AppLanguage.current == .english ? "does not extend validity" : "没有延长有效期")) == true)
     harness.calls = []
     harness.cancelledID = "a"
     harness.returnedExpiry = nil
     await harness.run()
     #expect(harness.calls.map(\.app.id) == ["a"])
-    #expect(harness.logs.last?.contains("已取消") == true)
+    #expect(harness.logs.last?.contains((AppLanguage.current == .english ? "cancelled" : "已取消")) == true)
 }
 
 @Test @MainActor func appStatusSurvivesRestartAndSeparatesAppsFromLegacyDeviceStatus() throws {
@@ -269,7 +270,7 @@ import Testing
     let a = harness.record("a").app
     let b = harness.record("b", remaining: 7 * 86_400).app
     RefreshStatusStore.record("phone", state: "旧版设备状态", expiration: b.expiration, success: true, preferences: harness.preferences)
-    RefreshStatusStore.recordApp(a, state: "续签失败", failure: "No Accounts", preferences: harness.preferences)
+    RefreshStatusStore.recordApp(a, state: L10n.tr("续签失败"), failure: "No Accounts", preferences: harness.preferences)
     let reloaded = try #require(UserDefaults(suiteName: harness.suite))
     #expect(RefreshStatusStore.load("phone", preferences: reloaded)?.state == "旧版设备状态")
     #expect(RefreshStatusStore.loadApp(a, preferences: reloaded).expiration == a.expiration)

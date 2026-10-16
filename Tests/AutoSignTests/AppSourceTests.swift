@@ -1,3 +1,4 @@
+import AutoSignLocalization
 import Foundation
 import Testing
 @testable import AutoSign
@@ -113,7 +114,7 @@ private func sourceTestSession() -> URLSession {
     #expect(!library.isBusy)
     await library.addSource("https://SOURCE.test:443/catalog.json#duplicate")
     #expect(library.sources.count == 1)
-    #expect(library.errorMessage?.contains("已经添加") == true)
+    #expect(library.errorMessage?.contains((AppLanguage.current == .english ? "already been added" : "已经添加")) == true)
     let reopened = SourceLibraryModel(preferences: preferences)
     #expect(reopened.selectedSource?.catalog.apps.first?.latestVersion?.version == "2.3.8")
     library.removeSelectedSource()

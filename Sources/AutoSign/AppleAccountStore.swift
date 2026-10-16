@@ -1,3 +1,4 @@
+import AutoSignLocalization
 import Foundation
 import Security
 
@@ -30,7 +31,7 @@ enum AppleAccountStore {
 
     nonisolated static func attributes(data: Data) -> [String: Any] {
         [kSecValueData as String: data,
-         kSecAttrLabel as String: "AutoSign 独立 Apple 账号"]
+         kSecAttrLabel as String: L10n.tr("AutoSign 独立 Apple 账号")]
     }
 
     static func save(_ credentials: AppleAccountCredentials) throws {
@@ -95,7 +96,7 @@ enum AppleAccountStore {
         let trustedStatus = SecTrustedApplicationCreateFromPath(executable, &trusted)
         guard trustedStatus == errSecSuccess, let trusted else { throw failure(trustedStatus) }
         var access: SecAccess?
-        let status = SecAccessCreate("AutoSign 独立 Apple 账号" as CFString, [trusted] as CFArray, &access)
+        let status = SecAccessCreate(L10n.tr("AutoSign 独立 Apple 账号") as CFString, [trusted] as CFArray, &access)
         guard status == errSecSuccess, let access else { throw failure(status) }
         return access
     }
@@ -125,12 +126,12 @@ enum AppleAccountStore {
 
     nonisolated static func failure(_ status: OSStatus) -> AutoSignError {
         if status == errSecMissingEntitlement {
-            return .command("此 AutoSign 构建没有系统钥匙串访问权限，请检查应用代码签名与钥匙串访问控制。")
+            return .command(L10n.tr("此 AutoSign 构建没有系统钥匙串访问权限，请检查应用代码签名与钥匙串访问控制。"))
         }
         if status == errSecInteractionNotAllowed {
-            return .command("Mac 登录钥匙串暂不可访问。请在重启后先登录一次 Mac，或解锁登录钥匙串；凭据已保留，不会因读取失败而删除。")
+            return .command(L10n.tr("Mac 登录钥匙串暂不可访问。请在重启后先登录一次 Mac，或解锁登录钥匙串；凭据已保留，不会因读取失败而删除。"))
         }
-        return .command("AutoSign 系统钥匙串操作失败（\(status)）。凭据不会写入配置文件或日志。")
+        return .command(L10n.tr("AutoSign 系统钥匙串操作失败（\(status)）。凭据不会写入配置文件或日志。"))
     }
 }
 
@@ -156,11 +157,11 @@ enum IndependentAccountError: Error, LocalizedError {
 
     var errorDescription: String? {
         switch self {
-        case .signInRequired: "请在 AutoSign“签名设置”登录独立 Apple 账号。"
-        case .verificationRequired: "Apple 要求双重验证，请在 AutoSign“签名设置”重新登录并完成验证码验证；已保留原凭据和应用签名。"
-        case .invalidResponse: "Apple 未返回有效的账号或签名数据，请稍后重试。"
-        case .teamMismatch: "独立账号不属于此应用原有签名团队。请登录原团队的账号；不会自动切换团队或覆盖原应用。"
-        case .providerChanged: "设备认证服务已改变，请在 AutoSign 重新登录独立账号；原凭据已保留。"
+        case .signInRequired: L10n.tr("请在 AutoSign“签名设置”登录独立 Apple 账号。")
+        case .verificationRequired: L10n.tr("Apple 要求双重验证，请在 AutoSign“签名设置”重新登录并完成验证码验证；已保留原凭据和应用签名。")
+        case .invalidResponse: L10n.tr("Apple 未返回有效的账号或签名数据，请稍后重试。")
+        case .teamMismatch: L10n.tr("独立账号不属于此应用原有签名团队。请登录原团队的账号；不会自动切换团队或覆盖原应用。")
+        case .providerChanged: L10n.tr("设备认证服务已改变，请在 AutoSign 重新登录独立账号；原凭据已保留。")
         }
     }
 }

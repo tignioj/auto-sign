@@ -1,3 +1,4 @@
+import AutoSignLocalization
 import AppKit
 import Foundation
 
@@ -14,7 +15,7 @@ final class AppModel: ObservableObject {
     @Published var identities: [SigningIdentity] = []
     @Published var selectedIdentityID: String?
     @Published var stage: InstallStage = .idle
-    @Published var detail = "选择一台设备，再选择源中的应用"
+    @Published var detail = L10n.tr("选择一台设备，再选择源中的应用")
     @Published var isRefreshing = false
     @Published var pairingDeviceID: String?
     @Published private(set) var profileOnlyRefresh = false
@@ -31,7 +32,7 @@ final class AppModel: ObservableObject {
     @Published var appRenewalStatuses: [String: [AppRenewalStatus]] = [:]
     @Published var renewalLibraryError: String?
     @Published var nextBackgroundCheck: Date?
-    @Published var schedulerStatus = "正在检查后台任务…"
+    @Published var schedulerStatus = L10n.tr("正在检查后台任务…")
 
     func refreshDashboard() async {
         accountStatus = await AccountStatus.inspect()
@@ -73,8 +74,8 @@ final class AppModel: ObservableObject {
         await refreshAvailableUpdates()
         if autoRefreshEnabled {
             let result = try? await ProcessRunner.run("/bin/launchctl", ["print", "gui/\(getuid())/\(BackgroundRefreshManager.label)"])
-            schedulerStatus = result?.status == 0 ? "后台任务已加载 · 每 30 分钟检查" : "后台任务未加载，请关闭再开启自动续签"
-        } else { schedulerStatus = "后台自动续签已关闭" }
+            schedulerStatus = result?.status == 0 ? L10n.tr("后台任务已加载 · 每 30 分钟检查") : L10n.tr("后台任务未加载，请关闭再开启自动续签")
+        } else { schedulerStatus = L10n.tr("后台自动续签已关闭") }
     }
 
     private var didInitializeDeviceSelection = false
@@ -168,7 +169,7 @@ final class AppModel: ObservableObject {
                 if let profileURL { preferences.set(profileURL.path, forKey: "profilePath") }
             }
             await refreshDashboard()
-            detail = devices.isEmpty ? "未发现设备，请通过 USB 连接并在设备上点“信任”" : "已刷新设备和签名证书"
+            detail = devices.isEmpty ? L10n.tr("未发现设备，请通过 USB 连接并在设备上点“信任”") : L10n.tr("已刷新设备和签名证书")
         } catch {
             stage = .failed(error.localizedDescription)
             detail = error.localizedDescription
@@ -185,7 +186,7 @@ final class AppModel: ObservableObject {
             managedApps = [:]
             availableUpdates = []
             clearAppSelection()
-            detail = "请选择一台 \(kind.title)"
+            detail = L10n.tr("请选择一台 \(kind.title)")
         }
     }
 
@@ -202,8 +203,8 @@ final class AppModel: ObservableObject {
         preferences.set(device.udid, forKey: Self.selectedDevicePreferenceKey)
         stage = .idle
         detail = device.isReadyForInstallation
-            ? "已选择 \(device.name)，请选择要安装或续签的应用"
-            : "已选择 \(device.name)：\(device.statusText)"
+            ? L10n.tr("已选择 \(device.name)，请选择要安装或续签的应用")
+            : L10n.tr("已选择 \(device.name)：\(device.statusText)")
         Task { await refreshDashboard() }
     }
 
@@ -227,7 +228,7 @@ final class AppModel: ObservableObject {
         }
         operationItems = []
         stage = .idle
-        detail = "已为 \(selectedDevice?.name ?? "当前设备") 选择 \(selectedApps.count) 个应用"
+        detail = L10n.tr("已为 \(selectedDevice?.name ?? L10n.tr("当前设备")) 选择 \(selectedApps.count) 个应用")
     }
 
     func removeSelectedApp(_ id: String) {
@@ -258,16 +259,16 @@ final class AppModel: ObservableObject {
         selectDevice(device)
         pairingDeviceID = device.id
         stage = .idle
-        detail = "正在发起配对，请保持 \(device.name) 解锁并留意设备上的确认提示…"
+        detail = L10n.tr("正在发起配对，请保持 \(device.name) 解锁并留意设备上的确认提示…")
         Task {
             defer { pairingDeviceID = nil }
             do {
                 try await DeviceService.pair(device)
-                detail = "配对成功，正在刷新设备状态…"
+                detail = L10n.tr("配对成功，正在刷新设备状态…")
                 await refresh()
                 if let refreshed = devices.first(where: { $0.udid == device.udid }),
                    !refreshed.developerModeEnabled {
-                    detail = "配对成功；请在设备的“设置 → 隐私与安全性 → 开发者模式”中开启开发者模式"
+                    detail = L10n.tr("配对成功；请在设备的“设置 → 隐私与安全性 → 开发者模式”中开启开发者模式")
                 }
             } catch {
                 stage = .failed(error.localizedDescription)
@@ -279,13 +280,13 @@ final class AppModel: ObservableObject {
     func chooseProfile() {
         guard !isBusy else { return }
         let panel = NSOpenPanel()
-        panel.title = "选择描述文件"
+        panel.title = L10n.tr("选择描述文件")
         panel.allowedContentTypes = [.init(filenameExtension: "mobileprovision")!]
         panel.allowsMultipleSelection = false
         if panel.runModal() == .OK, let url = panel.url {
             profileURL = url
             preferences.set(url.path, forKey: "profilePath")
-            detail = "已选择描述文件 \(url.lastPathComponent)"
+            detail = L10n.tr("已选择描述文件 \(url.lastPathComponent)")
         }
     }
 
@@ -301,11 +302,11 @@ final class AppModel: ObservableObject {
               let device = selectedDevice, sourceLibrary.beginDeviceOperation() else { return nil }
         let selections = selectedApps
         operationItems = selections.map {
-            RefreshItem(id: $0.id, name: $0.app.name, state: .queued, message: "等待\(operation.title)")
+            RefreshItem(id: $0.id, name: $0.app.name, state: .queued, message: L10n.tr("等待\(operation.title)"))
         }
         // Reserve the interface synchronously so a second click cannot start another batch.
         stage = .preparing
-        detail = "正在为 \(device.name) \(operation.title) \(selections.count) 个应用…"
+        detail = L10n.tr("正在为 \(device.name) \(operation.title) \(selections.count) 个应用…")
         return Task { [self] in
             defer {
                 sourceLibrary.endDeviceOperation()
@@ -328,13 +329,13 @@ final class AppModel: ObservableObject {
                 DeviceSelectionStore.savePending(pending, to: preferences)
             }
             RefreshStatusStore.record(device.udid, name: device.name,
-                state: "手动\(operation.title)：成功 \(completed)，失败 \(failures.count)",
+                state: L10n.tr("手动\(operation.title)：成功 \(completed)，失败 \(failures.count)"),
                 failure: failures.isEmpty ? nil : failures.map { "\($0.name)：\($0.message)" }.joined(separator: "；"),
                 success: completed > 0, preferences: preferences)
             await refreshDashboard()
             stage = failures.isEmpty ? .finished : .failed(failures.map(\.message).joined(separator: "；"))
-            detail = "\(device.name)：\(operation.title)完成 \(completed)/\(selections.count) 个应用"
-                + (failures.isEmpty ? "" : "，\(failures.count) 个失败，详见处理结果")
+            detail = L10n.tr("\(device.name)：\(operation.title)完成 \(completed)/\(selections.count) 个应用")
+                + (failures.isEmpty ? "" : L10n.tr("，\(failures.count) 个失败，详见处理结果"))
         }
     }
 
@@ -346,14 +347,14 @@ final class AppModel: ObservableObject {
             do {
                 if enabled {
                     guard await LocalNetworkAccess.shared.check() else {
-                        throw AutoSignError.command("请先在前台完成本地网络授权与检查，再开启自动续签。")
+                        throw AutoSignError.command(L10n.tr("请先在前台完成本地网络授权与检查，再开启自动续签。"))
                     }
                     await BackgroundRefreshManager.authorizeNotifications()
                     try await BackgroundRefreshManager.install()
-                    lastBackgroundStatus = "后台自动续签已开启"
+                    lastBackgroundStatus = L10n.tr("后台自动续签已开启")
                 } else {
                     try await BackgroundRefreshManager.uninstall()
-                    lastBackgroundStatus = "后台自动续签已关闭"
+                    lastBackgroundStatus = L10n.tr("后台自动续签已关闭")
                 }
                 autoRefreshEnabled = BackgroundRefreshManager.isInstalled
                 await refreshDashboard()

@@ -1,3 +1,4 @@
+import AutoSignLocalization
 import Foundation
 import Darwin
 
@@ -13,12 +14,12 @@ enum RemoteDeviceProfileService {
         let development = URL(fileURLWithPath: FileManager.default.currentDirectoryPath).appendingPathComponent(".build/debug/AutoSignRemoteHelper")
         guard let helper = [sibling, development].compactMap({ $0 }).first(where: {
             FileManager.default.isExecutableFile(atPath: $0.path)
-        }) else { throw ProfileRefreshError.deviceNotFound("缺少 CoreDevice 描述文件组件，请重新构建完整应用。") }
+        }) else { throw ProfileRefreshError.deviceNotFound(L10n.tr("缺少 CoreDevice 描述文件组件，请重新构建完整应用。")) }
         return try await DeviceConnectionRetry.run(operation: {
             // Discovery belongs inside the retry: preparing CoreDevice can also
             // fail while the Wi-Fi tunnel is being re-established.
             let connection = try await prepare(on: device)
-            var lastError: Error = ProfileRefreshError.unavailable("CoreDevice 描述文件连接尚未就绪。")
+            var lastError: Error = ProfileRefreshError.unavailable(L10n.tr("CoreDevice 描述文件连接尚未就绪。"))
             for port in connection.ports {
                 let command = [arguments[0], device.udid, connection.address, String(port), connection.hostID.uuidString]
                     + arguments.dropFirst(2)
@@ -42,7 +43,7 @@ enum RemoteDeviceProfileService {
             "--timeout", "15", "--json-output", url.path, "--quiet"])
         try Task.checkCancellation()
         guard result.status == 0 else {
-            throw ProfileRefreshError.unavailable("无法准备 CoreDevice 描述文件连接：\(result.output)")
+            throw ProfileRefreshError.unavailable(L10n.tr("无法准备 CoreDevice 描述文件连接：\(result.output)"))
         }
         let address = try tunnelAddress(from: Data(contentsOf: url), expectedUDID: device.udid)
         async let sockets = ProcessRunner.run("/usr/bin/nettop", ["-n", "-x", "-L", "1", "-m", "tcp", "-J", "interface,state"])
@@ -51,7 +52,7 @@ enum RemoteDeviceProfileService {
         let ports = parsePorts(socketResult.output, address: address)
         guard socketResult.status == 0, identityResult.status == 0, !ports.isEmpty,
               let hostID = parseHostID(identityResult.output) else {
-            throw ProfileRefreshError.unavailable("未找到此设备已配对的 CoreDevice 描述文件通道，请解锁设备后重试。")
+            throw ProfileRefreshError.unavailable(L10n.tr("未找到此设备已配对的 CoreDevice 描述文件通道，请解锁设备后重试。"))
         }
         return Connection(address: address, ports: ports, hostID: hostID)
     }
@@ -63,7 +64,7 @@ enum RemoteDeviceProfileService {
               let result = root["result"] as? [String: Any], let connection = result["connectionProperties"] as? [String: Any],
               connection["pairingState"] as? String == "paired",
               let address = connection["tunnelIPAddress"] as? String, ipv6(address) != nil else {
-            throw ProfileRefreshError.unavailable("CoreDevice 目标设备、配对状态或隧道地址无效，已停止操作。")
+            throw ProfileRefreshError.unavailable(L10n.tr("CoreDevice 目标设备、配对状态或隧道地址无效，已停止操作。"))
         }
         return address
     }

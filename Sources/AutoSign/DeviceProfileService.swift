@@ -1,3 +1,4 @@
+import AutoSignLocalization
 import Foundation
 
 enum ProfileRefreshError: LocalizedError, Sendable {
@@ -29,7 +30,7 @@ enum DeviceProfileService {
                                   statusChanged: @escaping @MainActor @Sendable (String) -> Void = { _ in }) async throws -> [Data] {
         let response = try await run(["list", device.udid], on: device, statusChanged: statusChanged)
         guard let profiles = response.profiles else {
-            throw ProfileRefreshError.verification("设备没有返回描述文件列表，无法确认续签结果。")
+            throw ProfileRefreshError.verification(L10n.tr("设备没有返回描述文件列表，无法确认续签结果。"))
         }
         return profiles
     }
@@ -46,7 +47,7 @@ enum DeviceProfileService {
         // Exact CMS bytes establish that the device holds the same Apple-signed
         // UUID, issue date, certificates and expiry that we validated locally.
         guard installed.contains(expected) else {
-            throw ProfileRefreshError.incompatible("设备未保存新的描述文件，改用完整安装更新签名。")
+            throw ProfileRefreshError.incompatible(L10n.tr("设备未保存新的描述文件，改用完整安装更新签名。"))
         }
     }
 
@@ -54,12 +55,13 @@ enum DeviceProfileService {
         // MobileDevice can emit diagnostics before our helper's single JSON line.
         guard let line = result.output.split(separator: "\n").last,
               let response = try? JSONDecoder().decode(Response.self, from: Data(line.utf8)) else {
-            throw ProfileRefreshError.unavailable("设备描述文件组件未正常完成（\(result.status)）：\(result.output.prefix(500))")
+            throw ProfileRefreshError.unavailable(L10n.tr("设备描述文件组件未正常完成（\(result.status)）：\(result.output.prefix(500))"))
         }
         guard result.status == 0, response.kind == "success" else {
             // Also suppress the misleading success detail from older helpers.
             let detail = response.status == 0 || response.detail == "kAMDSuccess" ? nil : response.detail
-            let message = [response.message, detail].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: "\n")
+            let message = [response.message.map { L10n.helperMessage($0) }, detail]
+                .compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: "\n")
             switch response.kind {
             case "deviceNotFound": throw ProfileRefreshError.deviceNotFound(message)
             case "unsupported": throw ProfileRefreshError.unsupported(message)
@@ -80,7 +82,7 @@ enum DeviceProfileService {
         guard let executable = [sibling, development].compactMap({ $0 }).first(where: {
             FileManager.default.isExecutableFile(atPath: $0.path)
         }) else {
-            throw ProfileRefreshError.unsupported("缺少描述文件更新组件，使用完整签名安装。请重新构建完整 AutoSign.app。")
+            throw ProfileRefreshError.unsupported(L10n.tr("缺少描述文件更新组件，使用完整签名安装。请重新构建完整 AutoSign.app。"))
         }
         return try await withTransportRecovery(legacy: {
             try await withConnectionRetry(operation: {
@@ -88,11 +90,11 @@ enum DeviceProfileService {
                 try Task.checkCancellation()
                 return try decodeResponse(result)
             }, beforeRetry: {
-                await statusChanged("描述文件连接暂时中断，正在重新连接设备…")
+                await statusChanged(L10n.tr("描述文件连接暂时中断，正在重新连接设备…"))
                 try await DeviceConnectionRetry.reconnect(to: device)
             })
         }, remote: {
-            await statusChanged("正在通过 CoreDevice 重新连接描述文件服务…")
+            await statusChanged(L10n.tr("正在通过 CoreDevice 重新连接描述文件服务…"))
             return try await RemoteDeviceProfileService.run(arguments, on: device)
         }, missingDevice: { message in
             try await missingDeviceError(message, on: device)
@@ -129,12 +131,12 @@ enum DeviceProfileService {
             return .unavailable(message)
         }
         guard try await isUnlocked(reachable) else {
-            return .unavailable("手机已锁定，无法确认描述文件连接是否可用，请解锁后重试。")
+            return .unavailable(L10n.tr("手机已锁定，无法确认描述文件连接是否可用，请解锁后重试。"))
         }
         try Task.checkCancellation()
         // CoreDevice can reach devices whose legacy MobileDevice transport is
         // unavailable. Only a fresh successful probe allows installation fallback.
-        return .unsupported("设备可通过 Xcode 连接，但当前连接不支持单独更新描述文件，改用完整签名安装")
+        return .unsupported(L10n.tr("设备可通过 Xcode 连接，但当前连接不支持单独更新描述文件，改用完整签名安装"))
     }
 
     static func withConnectionRetry<T>(operation: () async throws -> T,

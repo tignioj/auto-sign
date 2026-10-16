@@ -1,3 +1,4 @@
+import AutoSignLocalization
 import Foundation
 import Darwin
 
@@ -21,7 +22,7 @@ enum XPCWire {
     }
 
     static func encode(_ value: Any, depth: Int = 0) throws -> Data {
-        guard depth < 32 else { throw RemoteFailure("RemoteXPC 数据嵌套过深。") }
+        guard depth < 32 else { throw RemoteFailure(L10n.tr("RemoteXPC 数据嵌套过深。")) }
         func tag(_ type: UInt64, _ body: Data = Data()) -> Data { integer(type, bytes: 4) + body }
         if let value = value as? String {
             let bytes = Data(value.utf8) + Data([0])
@@ -40,13 +41,13 @@ enum XPCWire {
         if let value = value as? [String: Any] {
             var body = integer(UInt64(value.count), bytes: 4)
             for key in value.keys.sorted() {
-                guard !key.utf8.contains(0) else { throw RemoteFailure("RemoteXPC 字段名称无效。") }
+                guard !key.utf8.contains(0) else { throw RemoteFailure(L10n.tr("RemoteXPC 字段名称无效。")) }
                 body += padded(Data(key.utf8) + Data([0]))
                 body += try encode(value[key]!, depth: depth + 1)
             }
             return tag(0xf000, integer(UInt64(body.count), bytes: 4) + body)
         }
-        throw RemoteFailure("不支持的 RemoteXPC 请求数据类型。")
+        throw RemoteFailure(L10n.tr("不支持的 RemoteXPC 请求数据类型。"))
     }
 
     static func message(_ dictionary: [String: Any]?, flags: UInt64, id: UInt64 = 0) throws -> Data {
@@ -63,7 +64,7 @@ enum XPCWire {
         var offset = 0
 
         mutating func take(_ count: Int) throws -> Data {
-            guard count >= 0, count <= data.count - offset else { throw RemoteFailure("RemoteXPC 响应被截断。") }
+            guard count >= 0, count <= data.count - offset else { throw RemoteFailure(L10n.tr("RemoteXPC 响应被截断。")) }
             defer { offset += count }
             return data.subdata(in: offset..<(offset + count))
         }
@@ -77,7 +78,7 @@ enum XPCWire {
         mutating func string() throws -> String {
             guard let end = data[offset...].firstIndex(of: 0),
                   let value = String(data: data.subdata(in: offset..<end), encoding: .utf8) else {
-                throw RemoteFailure("RemoteXPC 字符串格式无效。")
+                throw RemoteFailure(L10n.tr("RemoteXPC 字符串格式无效。"))
             }
             offset = end + 1
             try align()
@@ -85,7 +86,7 @@ enum XPCWire {
         }
 
         mutating func object(depth: Int = 0) throws -> Any {
-            guard depth < 32 else { throw RemoteFailure("RemoteXPC 响应嵌套过深。") }
+            guard depth < 32 else { throw RemoteFailure(L10n.tr("RemoteXPC 响应嵌套过深。")) }
             let type = try number(4)
             switch type {
             case 0x1000: return NSNull()
@@ -95,48 +96,48 @@ enum XPCWire {
             case 0x5000: return NSNumber(value: Double(bitPattern: try number(8)))
             case 0x8000, 0x9000:
                 let length = try number(4)
-                guard length <= UInt64(Self.maximumLength) else { throw RemoteFailure("RemoteXPC 数据过大。") }
+                guard length <= UInt64(Self.maximumLength) else { throw RemoteFailure(L10n.tr("RemoteXPC 数据过大。")) }
                 let bytes = try take(Int(length)); try align()
                 if type == 0x8000 { return bytes }
                 guard bytes.last == 0, let value = String(data: bytes.dropLast(), encoding: .utf8) else {
-                    throw RemoteFailure("RemoteXPC 字符串格式无效。")
+                    throw RemoteFailure(L10n.tr("RemoteXPC 字符串格式无效。"))
                 }
                 return value
             case 0xa000: return try take(16)
             case 0xe000, 0xf000:
                 let length = try number(4)
-                guard length >= 4, length <= UInt64(data.count - offset) else { throw RemoteFailure("RemoteXPC 容器长度无效。") }
+                guard length >= 4, length <= UInt64(data.count - offset) else { throw RemoteFailure(L10n.tr("RemoteXPC 容器长度无效。")) }
                 let end = offset + Int(length), count = try number(4)
-                guard count <= 65_536 else { throw RemoteFailure("RemoteXPC 容器过大。") }
+                guard count <= 65_536 else { throw RemoteFailure(L10n.tr("RemoteXPC 容器过大。")) }
                 var dictionary: [String: Any] = [:], array: [Any] = []
                 for _ in 0..<count {
                     if type == 0xf000 {
                         let key = try string()
-                        guard dictionary[key] == nil else { throw RemoteFailure("RemoteXPC 响应包含重复字段。") }
+                        guard dictionary[key] == nil else { throw RemoteFailure(L10n.tr("RemoteXPC 响应包含重复字段。")) }
                         dictionary[key] = try object(depth: depth + 1)
                     } else { array.append(try object(depth: depth + 1)) }
-                    guard offset <= end else { throw RemoteFailure("RemoteXPC 容器越界。") }
+                    guard offset <= end else { throw RemoteFailure(L10n.tr("RemoteXPC 容器越界。")) }
                 }
-                guard offset == end else { throw RemoteFailure("RemoteXPC 容器长度不匹配。") }
+                guard offset == end else { throw RemoteFailure(L10n.tr("RemoteXPC 容器长度不匹配。")) }
                 return type == 0xf000 ? dictionary : array
-            default: throw RemoteFailure("不支持的 RemoteXPC 响应类型：\(type)。", kind: "unsupported")
+            default: throw RemoteFailure(L10n.tr("不支持的 RemoteXPC 响应类型：\(type)。"), kind: "unsupported")
             }
         }
         private static let maximumLength = XPCWire.limit
     }
 
     static func decodeMessage(_ data: Data) throws -> [String: Any]? {
-        guard data.count <= limit else { throw RemoteFailure("RemoteXPC 响应过大。") }
+        guard data.count <= limit else { throw RemoteFailure(L10n.tr("RemoteXPC 响应过大。")) }
         var reader = Reader(data: data)
-        guard try reader.number(4) == 0x29b00b92 else { throw RemoteFailure("RemoteXPC 响应标识错误。") }
+        guard try reader.number(4) == 0x29b00b92 else { throw RemoteFailure(L10n.tr("RemoteXPC 响应标识错误。")) }
         _ = try reader.number(4)
         let length = try reader.number(8)
         _ = try reader.number(8)
-        guard length == UInt64(data.count - 24) else { throw RemoteFailure("RemoteXPC 消息长度不匹配。") }
+        guard length == UInt64(data.count - 24) else { throw RemoteFailure(L10n.tr("RemoteXPC 消息长度不匹配。")) }
         if length == 0 { return nil }
         guard try reader.number(4) == 0x42133742, try reader.number(4) == 5,
               let result = try reader.object() as? [String: Any], reader.offset == data.count else {
-            throw RemoteFailure("RemoteXPC 消息格式不兼容。", kind: "unsupported")
+            throw RemoteFailure(L10n.tr("RemoteXPC 消息格式不兼容。"), kind: "unsupported")
         }
         return result
     }
@@ -150,9 +151,9 @@ final class RemoteSocket {
         endpoint.sin6_len = UInt8(MemoryLayout<sockaddr_in6>.size)
         endpoint.sin6_family = sa_family_t(AF_INET6)
         endpoint.sin6_port = port.bigEndian
-        guard inet_pton(AF_INET6, address, &endpoint.sin6_addr) == 1 else { throw RemoteFailure("CoreDevice 地址无效。", kind: "invalid") }
+        guard inet_pton(AF_INET6, address, &endpoint.sin6_addr) == 1 else { throw RemoteFailure(L10n.tr("CoreDevice 地址无效。"), kind: "invalid") }
         let descriptor = socket(AF_INET6, SOCK_STREAM, 0)
-        guard descriptor >= 0 else { throw RemoteFailure("无法创建 CoreDevice 连接。") }
+        guard descriptor >= 0 else { throw RemoteFailure(L10n.tr("无法创建 CoreDevice 连接。")) }
         var timeout = timeval(tv_sec: 5, tv_usec: 0), enabled: Int32 = 1
         setsockopt(descriptor, SOL_SOCKET, SO_RCVTIMEO, &timeout, socklen_t(MemoryLayout<timeval>.size))
         setsockopt(descriptor, SOL_SOCKET, SO_SNDTIMEO, &timeout, socklen_t(MemoryLayout<timeval>.size))
@@ -163,19 +164,19 @@ final class RemoteSocket {
         if result != 0 {
             let message = String(cString: strerror(errno))
             Darwin.close(descriptor)
-            throw RemoteFailure("CoreDevice 连接失败：\(message)")
+            throw RemoteFailure(L10n.tr("CoreDevice 连接失败：\(message)"))
         }
         fd = descriptor
     }
     deinit { Darwin.close(fd) }
 
     func read(_ count: Int) throws -> Data {
-        guard count >= 0, count <= 32 * 1024 * 1024 else { throw RemoteFailure("设备响应大小无效。") }
+        guard count >= 0, count <= 32 * 1024 * 1024 else { throw RemoteFailure(L10n.tr("设备响应大小无效。")) }
         var bytes = [UInt8](repeating: 0, count: count), offset = 0
         while offset < count {
             let size = bytes.withUnsafeMutableBytes { Darwin.recv(fd, $0.baseAddress!.advanced(by: offset), count - offset, 0) }
             if size < 0 && errno == EINTR { continue }
-            guard size > 0 else { throw RemoteFailure("CoreDevice 连接中断或读取超时，请重试。") }
+            guard size > 0 else { throw RemoteFailure(L10n.tr("CoreDevice 连接中断或读取超时，请重试。")) }
             offset += size
         }
         return Data(bytes)
@@ -186,7 +187,7 @@ final class RemoteSocket {
         while offset < data.count {
             let size = data.withUnsafeBytes { Darwin.send(fd, $0.baseAddress!.advanced(by: offset), data.count - offset, 0) }
             if size < 0 && errno == EINTR { continue }
-            guard size > 0 else { throw RemoteFailure("CoreDevice 连接中断或写入超时，请重试。") }
+            guard size > 0 else { throw RemoteFailure(L10n.tr("CoreDevice 连接中断或写入超时，请重试。")) }
             offset += size
         }
     }
@@ -199,7 +200,7 @@ final class RemoteSocket {
         }
         let length = try read(4).reduce(UInt32(0)) { ($0 << 8) | UInt32($1) }
         guard let result = try PropertyListSerialization.propertyList(from: read(Int(length)), format: nil) as? [String: Any] else {
-            throw RemoteFailure("设备没有返回有效的描述文件响应。")
+            throw RemoteFailure(L10n.tr("设备没有返回有效的描述文件响应。"))
         }
         return result
     }
@@ -227,11 +228,11 @@ final class RemoteSocket {
         for _ in 0..<512 {
             let header = [UInt8](try read(9))
             let length = Int(header[0]) << 16 | Int(header[1]) << 8 | Int(header[2])
-            guard length <= XPCWire.limit else { throw RemoteFailure("RemoteXPC 帧过大。") }
+            guard length <= XPCWire.limit else { throw RemoteFailure(L10n.tr("RemoteXPC 帧过大。")) }
             let type = header[3], flags = header[4]
             let stream = header[5...8].reduce(UInt32(0)) { ($0 << 8) | UInt32($1) } & 0x7fffffff
             let payload = try read(length)
-            if type == 7 || type == 3 { throw RemoteFailure("CoreDevice 发现连接被重置，请重试。") }
+            if type == 7 || type == 3 { throw RemoteFailure(L10n.tr("CoreDevice 发现连接被重置，请重试。")) }
             if type == 4 && flags & 1 == 0 {
                 try frame(4, flags: 1)
                 if !sentHandshake {
@@ -240,13 +241,13 @@ final class RemoteSocket {
                 }
             } else if type == 6 && flags & 1 == 0 { try frame(6, flags: 1, data: payload) }
             else if type == 0 {
-                guard flags & 8 == 0 else { throw RemoteFailure("不支持的 RemoteXPC 填充帧。", kind: "unsupported") }
+                guard flags & 8 == 0 else { throw RemoteFailure(L10n.tr("不支持的 RemoteXPC 填充帧。"), kind: "unsupported") }
                 pending[stream, default: Data()] += payload
-                guard pending[stream]!.count <= XPCWire.limit else { throw RemoteFailure("RemoteXPC 响应过大。") }
+                guard pending[stream]!.count <= XPCWire.limit else { throw RemoteFailure(L10n.tr("RemoteXPC 响应过大。")) }
                 while let bytes = pending[stream], bytes.count >= 24 {
                     var reader = XPCWire.Reader(data: bytes, offset: 8)
                     let size = try reader.number(8)
-                    guard size <= UInt64(XPCWire.limit - 24) else { throw RemoteFailure("RemoteXPC 消息过大。") }
+                    guard size <= UInt64(XPCWire.limit - 24) else { throw RemoteFailure(L10n.tr("RemoteXPC 消息过大。")) }
                     let total = Int(size) + 24
                     if bytes.count < total { break }
                     let message = try XPCWire.decodeMessage(bytes.prefix(total))
@@ -255,6 +256,6 @@ final class RemoteSocket {
                 }
             }
         }
-        throw RemoteFailure("CoreDevice 没有返回描述文件服务信息。")
+        throw RemoteFailure(L10n.tr("CoreDevice 没有返回描述文件服务信息。"))
     }
 }

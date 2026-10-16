@@ -17,6 +17,10 @@ cp "$project_dir/.build/release/AutoSignDeviceHelper" "$contents_dir/MacOS/AutoS
 cp "$project_dir/.build/release/AutoSignRemoteHelper" "$contents_dir/MacOS/AutoSignRemoteHelper"
 cp "$project_dir/Resources/AppInfo.plist" "$contents_dir/Info.plist"
 cp "$project_dir/Resources/Brand/AutoSign.icns" "$contents_dir/Resources/AutoSign.icns"
+/usr/bin/ditto "$project_dir/.build/release/AutoSign_AutoSignLocalization.bundle" "$contents_dir/Resources/AutoSign_AutoSignLocalization.bundle"
+for language in en zh-Hans; do
+    /usr/bin/ditto "$project_dir/Resources/$language.lproj" "$contents_dir/Resources/$language.lproj"
+done
 /usr/bin/ditto "$project_dir/ProvisioningHelper" "$contents_dir/Resources/ProvisioningHelper"
 signing_identity="${AUTOSIGN_MAC_SIGNING_IDENTITY:-}"
 if [[ -z "$signing_identity" ]]; then

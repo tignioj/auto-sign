@@ -1,3 +1,4 @@
+import AutoSignLocalization
 import Foundation
 
 enum DeviceAppVerification {
@@ -36,7 +37,7 @@ enum DeviceAppVerification {
             let data = try await command(["device", "info", "apps", "--device", device.udid, "--bundle-id", bundleID])
             return try JSONDecoder().decode(Applications.self, from: data).result.apps.first { $0.bundleIdentifier == bundleID }
         }, beforeRetry: {
-            await statusChanged("读取应用信息时连接中断，正在重新建立设备连接…")
+            await statusChanged(L10n.tr("读取应用信息时连接中断，正在重新建立设备连接…"))
             try await DeviceConnectionRetry.reconnect(to: device)
         })
     }
@@ -44,7 +45,7 @@ enum DeviceAppVerification {
     @discardableResult
     static func verifyLaunch(_ bundleID: String, on device: AppleDevice, freshLaunch: Bool = false) async throws -> Int {
         guard try await isUnlocked(on: device) else {
-            throw ProfileRefreshError.unavailable("手机已锁定，无法验证应用启动；请解锁设备后重新刷新。")
+            throw ProfileRefreshError.unavailable(L10n.tr("手机已锁定，无法验证应用启动；请解锁设备后重新刷新。"))
         }
         // Do not terminate a running Store or bring background renewals to the
         // foreground. A separate real-device test also verifies a fresh launch.
@@ -56,7 +57,7 @@ enum DeviceAppVerification {
         guard try JSONDecoder().decode(Processes.self, from: processes).result.runningProcesses.contains(where: {
             $0.processIdentifier == pid
         }) else {
-            throw ProfileRefreshError.verification("应用启动后已退出，续签尚未通过启动验证，请解锁设备后检查应用。")
+            throw ProfileRefreshError.verification(L10n.tr("应用启动后已退出，续签尚未通过启动验证，请解锁设备后检查应用。"))
         }
         return pid
     }
@@ -81,9 +82,9 @@ enum DeviceAppVerification {
         try Task.checkCancellation()
         guard result.status == 0 else {
             if checkingSignature, isSignatureFailure(result.output) {
-                throw ProfileRefreshError.incompatible("应用未通过设备签名检查：\(result.output)")
+                throw ProfileRefreshError.incompatible(L10n.tr("应用未通过设备签名检查：\(result.output)"))
             }
-            throw ProfileRefreshError.unavailable("设备验证失败（\(arguments.prefix(3).joined(separator: " "))）：\(result.output)")
+            throw ProfileRefreshError.unavailable(L10n.tr("设备验证失败（\(arguments.prefix(3).joined(separator: " "))）：\(result.output)"))
         }
         return try Data(contentsOf: url)
     }

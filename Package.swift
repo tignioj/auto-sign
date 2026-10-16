@@ -6,6 +6,7 @@ let authBuildRoot = URL(fileURLWithPath: #filePath).deletingLastPathComponent().
 
 let package = Package(
     name: "AutoSign",
+    defaultLocalization: "en",
     platforms: [.macOS(.v14)],
     products: [
         .executable(name: "AutoSign", targets: ["AutoSign"]),
@@ -17,7 +18,9 @@ let package = Package(
         .package(url: "https://github.com/altstoreio/AnisetteKit.git", revision: "1f5a7e36553cc865b873f222b87a6486c0bcc7bf")
     ],
     targets: [
+        .target(name: "AutoSignLocalization", resources: [.process("Resources")]),
         .executableTarget(name: "AutoSign", dependencies: [
+            "AutoSignLocalization",
             .product(name: "AltSign-Static", package: "AltSign"),
             .product(name: "AnisetteKit", package: "AnisetteKit")
         ], linkerSettings: [.unsafeFlags([
@@ -26,7 +29,7 @@ let package = Package(
             "-framework", "OpenSSL", "-Xlinker", "-rpath", "-Xlinker", "@executable_path/../Frameworks"
         ])]),
         .executableTarget(name: "AutoSignDeviceHelper", linkerSettings: [.linkedFramework("Foundation")]),
-        .executableTarget(name: "AutoSignRemoteHelper"),
-        .testTarget(name: "AutoSignTests", dependencies: ["AutoSign", "AutoSignRemoteHelper"])
+        .executableTarget(name: "AutoSignRemoteHelper", dependencies: ["AutoSignLocalization"]),
+        .testTarget(name: "AutoSignTests", dependencies: ["AutoSign", "AutoSignRemoteHelper", "AutoSignLocalization"])
     ]
 )

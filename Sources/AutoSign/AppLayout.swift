@@ -1,3 +1,4 @@
+import AutoSignLocalization
 import SwiftUI
 
 enum AppPage: String, CaseIterable, Identifiable {
@@ -7,13 +8,13 @@ enum AppPage: String, CaseIterable, Identifiable {
 
     var title: String {
         switch self {
-        case .install: "安装应用"
-        case .sources: "应用源"
-        case .devices: "设备管理"
-        case .renewal: "自动续签"
-        case .connection: "手机连接"
-        case .signing: "签名设置"
-        case .help: "使用指南"
+        case .install: L10n.tr("安装应用")
+        case .sources: L10n.tr("应用源")
+        case .devices: L10n.tr("设备管理")
+        case .renewal: L10n.tr("自动续签")
+        case .connection: L10n.tr("手机连接")
+        case .signing: L10n.tr("签名设置")
+        case .help: L10n.tr("使用指南")
         }
     }
 
@@ -31,13 +32,13 @@ enum AppPage: String, CaseIterable, Identifiable {
 
     var subtitle: String {
         switch self {
-        case .install: "为一台设备选择应用，批量安装或续签。"
-        case .sources: "管理订阅地址，在安装页浏览和选择应用。"
-        case .devices: "连接、配对并选择本次操作的目标设备。"
-        case .renewal: "管理后台续签，查看各设备应用的签名有效期。"
-        case .connection: "连接 AutoSign Store，在手机上安装和续签应用。"
-        case .signing: "登录 Apple 账号，管理签名团队、证书与描述文件。"
-        case .help: "从首次安装到无线续签，按需查看操作说明。"
+        case .install: L10n.tr("为一台设备选择应用，批量安装或续签。")
+        case .sources: L10n.tr("管理订阅地址，在安装页浏览和选择应用。")
+        case .devices: L10n.tr("连接、配对并选择本次操作的目标设备。")
+        case .renewal: L10n.tr("管理后台续签，查看各设备应用的签名有效期。")
+        case .connection: L10n.tr("连接 AutoSign Store，在手机上安装和续签应用。")
+        case .signing: L10n.tr("登录 Apple 账号，管理签名团队、证书与描述文件。")
+        case .help: L10n.tr("从首次安装到无线续签，按需查看操作说明。")
         }
     }
 }
@@ -60,5 +61,5 @@ struct AppCard<Content: View>: View {
 }
 
 func displayDate(_ date: Date?) -> String {
-    date?.formatted(date: .abbreviated, time: .shortened) ?? "暂无记录"
+    date.map { L10n.date($0) } ?? L10n.tr("暂无记录")
 }

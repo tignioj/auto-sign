@@ -2,7 +2,7 @@
 
 AutoSign 是一个原生 macOS 图形工具，用自己的 Apple 开发者身份，为应用源中的 `.ipa` 重新签名并安装到自己的 iPhone 或 iPad。支持跨源批量安装、按设备和应用自动续签，以及通过 [AutoSign Store](https://github.com/tignioj/auto-sign-store) 手机客户端安装、更新和刷新签名。
 
-当前源码版本为 **1.9.3（build 17）**。安装和续签由 Mac 完成，手机端无需输入 Apple ID 或保存签名证书。新增独立 Apple 账号签发，锁屏真机验收需完成本机登录后执行。
+当前源码版本为 **1.10.0（build 18）**。安装和续签由 Mac 完成，手机端无需输入 Apple ID 或保存签名证书。支持简体中文 / English 即时切换，界面及后台续签提示跟随所选语言。独立 Apple 账号签发的锁屏真机验收需完成本机登录后执行。
 
 ## 使用前准备
 
@@ -60,6 +60,12 @@ swift run AutoSign
 `swift build` 会同时生成管理设备描述文件的 `AutoSignDeviceHelper` 和 `AutoSignRemoteHelper`。打包脚本将这两个原生组件和 `ProvisioningHelper` Xcode 工程放入应用，并进行本地 ad hoc 签名；无需额外安装 Python 或 libimobiledevice。后台续签建议使用打包后的应用，避免构建目录变化导致任务找不到可执行文件。
 
 ## 操作
+
+### 界面语言
+
+AutoSign 支持 **简体中文 / English**，默认跟随系统语言；其他系统语言回退到英文。可在侧边栏底部的语言菜单，或 **签名设置 → 语言** 中切换，界面立即生效，选择会保存在本机。后台续签和手机服务新生成的提示、错误与通知也使用该语言，日期按所选语言格式显示。应用源提供的应用名称、介绍、更新说明及外部工具原始诊断保持原内容；历史详细日志保留记录时的语言。
+
+翻译资源位于 `Sources/AutoSignLocalization/Resources/{en,zh-Hans}.lproj/Localizable.strings`，通过 `L10n.tr("文案 \(value)")` 统一读取。插值会转换成 `{0}`、`{1}` 等占位符，翻译可调整顺序，但应保留全部占位符。`Scripts/build-app.sh` 会同时打包语言资源及本地网络权限说明。可分别运行 `AUTOSIGN_LANGUAGE=en swift test` 和 `AUTOSIGN_LANGUAGE=zh-Hans swift test` 验证两种语言；环境变量只用于测试或启动时覆盖，普通使用无需设置。
 
 界面按功能分为独立页面，通过左侧导航切换：
 

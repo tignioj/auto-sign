@@ -1,3 +1,4 @@
+import AutoSignLocalization
 import Foundation
 import CryptoKit
 @preconcurrency import AltSign
@@ -67,7 +68,7 @@ enum LocalAnisetteProvider {
         guard let machine = values[AnisetteConstants.Headers.machineID], !machine.isEmpty,
               let otp = values[AnisetteConstants.Headers.oneTimePassword], !otp.isEmpty,
               let routing = values[AnisetteConstants.Headers.routingInfo], let routingNumber = UInt64(routing) else {
-            throw AutoSignError.command("本机未能生成有效的 Apple 设备认证数据，请稍后重试。")
+            throw AutoSignError.command(L10n.tr("本机未能生成有效的 Apple 设备认证数据，请稍后重试。"))
         }
         if let blob { identity.blob = blob }
         identity.routingInfo = routing
@@ -81,7 +82,7 @@ enum LocalAnisetteProvider {
     private static func prepareLibraries(at directory: URL,
                                          statusChanged: @MainActor @Sendable (String) -> Void) async throws {
         if AnisetteClient.validateLibrariesExist(at: directory) { return }
-        statusChanged("首次登录：正在从 Apple 下载本机设备认证组件…")
+        statusChanged(L10n.tr("首次登录：正在从 Apple 下载本机设备认证组件…"))
         let source = URL(string: "https://apps.mzstatic.com/content/android-apple-music-apk/applemusic.apk")!
         let (archive, response) = try await URLSession.shared.download(from: source)
         defer { try? FileManager.default.removeItem(at: archive) }
@@ -92,7 +93,7 @@ enum LocalAnisetteProvider {
         let names = AnisetteConstants.Libraries.requiredNames
         _ = try await ProcessRunner.checked("/usr/bin/unzip",
             ["-o", "-j", "-q", archive.path] + names.map { "lib/arm64-v8a/\($0)" } + ["-d", temporary.path],
-            context: "无法提取 Apple 设备认证组件。")
+            context: L10n.tr("无法提取 Apple 设备认证组件。"))
         guard AnisetteClient.validateLibrariesExist(at: temporary) else { throw URLError(.cannotDecodeContentData) }
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
         for name in names {

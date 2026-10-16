@@ -1,9 +1,10 @@
+import AutoSignLocalization
 import Foundation
 
 struct RefreshStatus: Codable, Identifiable, Sendable {
     var id: String
     var name: String
-    var state: String = "尚无续签记录"
+    var state: String = L10n.tr("尚无续签记录")
     var updatedAt: Date?
     var lastSuccess: Date?
     var expiration: Date?
@@ -11,12 +12,12 @@ struct RefreshStatus: Codable, Identifiable, Sendable {
     var nextEligible: Date?
 
     func nextAttempt(check: Date?, enabled: Bool, now: Date = Date()) -> String {
-        guard enabled else { return "自动续签已关闭" }
-        guard let check else { return "等待首次后台检查" }
-        if check < now { return "检查时间已到，等待后台运行（Mac 需保持唤醒）" }
+        guard enabled else { return L10n.tr("自动续签已关闭") }
+        guard let check else { return L10n.tr("等待首次后台检查") }
+        if check < now { return L10n.tr("检查时间已到，等待后台运行（Mac 需保持唤醒）") }
         let window = nextEligible ?? expiration?.addingTimeInterval(-BackgroundRefreshCoordinator.renewalWindow)
         let due = failure != nil ? check : max(check, window ?? check)
-        return "预计 " + due.formatted(date: .abbreviated, time: .shortened)
+        return L10n.tr("预计 ") + L10n.date(due)
     }
 }
 
@@ -34,9 +35,9 @@ enum RefreshStatusStore {
 
     static func loadApp(_ app: StoreApp, preferences: UserDefaults = .standard) -> RefreshStatus {
         var value = loadValue(key: "appRefresh.\(app.id)", preferences: preferences)
-            ?? RefreshStatus(id: app.id, name: app.name, state: "等待后台检查")
+            ?? RefreshStatus(id: app.id, name: app.name, state: L10n.tr("等待后台检查"))
         if let updated = value.updatedAt, app.refreshedAt > updated {
-            value.state = "应用记录已更新，等待后台检查"
+            value.state = L10n.tr("应用记录已更新，等待后台检查")
             value.failure = nil
         }
         value.name = app.name
@@ -83,16 +84,16 @@ enum RefreshStatusStore {
     }
 
     static func failureSummary(_ raw: String) -> String {
-        if raw.contains("No Accounts") { return "Xcode 未读取到可用账号。请在 Xcode → Settings → Apple Accounts 检查登录状态。" }
-        if raw.localizedCaseInsensitiveContains("developer disk image") { return "开发者磁盘镜像挂载失败。请解锁设备后重试；若仍失败，通过 USB 连接并在 Xcode 中检查设备支持。" }
-        if raw.localizedCaseInsensitiveContains("locked") { return "设备或钥匙串已锁定，请解锁后重试。" }
-        return raw.split(separator: "\n").first.map(String.init) ?? raw
+        if raw.contains("No Accounts") { return L10n.tr("Xcode 未读取到可用账号。请在 Xcode → Settings → Apple Accounts 检查登录状态。") }
+        if raw.localizedCaseInsensitiveContains("developer disk image") { return L10n.tr("开发者磁盘镜像挂载失败。请解锁设备后重试；若仍失败，通过 USB 连接并在 Xcode 中检查设备支持。") }
+        if raw.localizedCaseInsensitiveContains("locked") { return L10n.tr("设备或钥匙串已锁定，请解锁后重试。") }
+        return L10n.stored(raw.split(separator: "\n").first.map(String.init) ?? raw)
     }
 }
 
 struct AccountStatus: Sendable {
-    var title = "正在检查 Xcode 账号…"
-    var detail = "本地签名证书不代表账号仍可在线续签。"
+    var title = L10n.tr("正在检查 Xcode 账号…")
+    var detail = L10n.tr("本地签名证书不代表账号仍可在线续签。")
 
     static func inspect() async -> AccountStatus {
         // Read the persisted account index, not a certificate or Xcode's cached UI.
@@ -101,11 +102,11 @@ struct AccountStatus: Sendable {
               let root = try? PropertyListSerialization.propertyList(from: result.data, format: nil) as? [String: Any],
               let lists = root["DVTDeveloperAccountManagerAppleIDLists"] as? [String: Any],
               let accounts = lists["IDE.Identifiers.Prod"] as? [Any] else {
-            return AccountStatus(title: "账号状态未知", detail: "无法读取 Xcode 账号记录，请在 Xcode 中确认；未验证在线登录。")
+            return AccountStatus(title: L10n.tr("账号状态未知"), detail: L10n.tr("无法读取 Xcode 账号记录，请在 Xcode 中确认；未验证在线登录。"))
         }
         if accounts.isEmpty {
-            return AccountStatus(title: "未检测到 Xcode 账号记录", detail: "自动续签可能受阻。请在 Xcode → Settings → Apple Accounts 检查或添加账号。")
+            return AccountStatus(title: L10n.tr("未检测到 Xcode 账号记录"), detail: L10n.tr("自动续签可能受阻。请在 Xcode → Settings → Apple Accounts 检查或添加账号。"))
         }
-        return AccountStatus(title: "检测到 \(accounts.count) 个 Xcode 账号记录", detail: "尚未验证在线登录有效性；实际续签结果见“自动续签”页面的设备记录。")
+        return AccountStatus(title: L10n.tr("检测到 \(accounts.count) 个 Xcode 账号记录"), detail: L10n.tr("尚未验证在线登录有效性；实际续签结果见“自动续签”页面的设备记录。"))
     }
 }

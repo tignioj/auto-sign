@@ -1,3 +1,4 @@
+import AutoSignLocalization
 import CoreGraphics
 import Foundation
 import Testing
@@ -24,8 +25,8 @@ import Testing
         statusChanged: { messages.append($0) })
     #expect(waits == 2)
     #expect(messages.count == 2)
-    #expect(messages.first?.contains("等待 Mac 解锁") == true)
-    #expect(messages.last?.contains("继续") == true)
+    #expect(messages.first?.contains((AppLanguage.current == .english ? "Waiting for the Mac to unlock" : "等待 Mac 解锁")) == true)
+    #expect(messages.last?.contains((AppLanguage.current == .english ? "Resuming" : "继续")) == true)
 }
 
 @MainActor @Test func xcodeCredentialWaitCancellationNeverResumes() async {
@@ -36,7 +37,7 @@ import Testing
         Issue.record("Expected cancellation")
     } catch { #expect(error is CancellationError) }
     #expect(messages.count == 1)
-    #expect(messages.first?.contains("等待 Mac 解锁") == true)
+    #expect(messages.first?.contains((AppLanguage.current == .english ? "Waiting for the Mac to unlock" : "等待 Mac 解锁")) == true)
 }
 
 @MainActor @Test func xcodeCredentialWaitFailsClosedWhenSessionIsUnknown() async {
@@ -45,7 +46,7 @@ import Testing
         try await XcodeCredentialAccess.waitUntilAvailable(state: { .unavailable },
             pause: { waits += 1 }, statusChanged: { _ in })
         Issue.record("Expected unavailable session failure")
-    } catch { #expect(error.localizedDescription.contains("已停止调用 Xcode")) }
+    } catch { #expect(error.localizedDescription.contains((AppLanguage.current == .english ? "Xcode was not called" : "已停止调用 Xcode"))) }
     #expect(waits == 0)
 }
 
@@ -54,10 +55,10 @@ import Testing
                    "error: No Accounts: Add a new account", "errSecInteractionNotAllowed (-25308)"] {
         let message = XcodeCredentialAccess.provisioningFailure(detail)
         #expect(message.contains("Apple Accounts"))
-        #expect(message.contains("解锁 Mac"))
+        #expect(message.contains((AppLanguage.current == .english ? "Unlock your Mac" : "解锁 Mac")))
         #expect(message.contains(detail))
     }
     let preparation = "The developer disk image could not be mounted"
     #expect(DevicePreparationRetry.isRetryable(XcodeCredentialAccess.provisioningFailure(preparation)))
-    #expect(!XcodeCredentialAccess.provisioningFailure(preparation).contains("重新登录"))
+    #expect(!XcodeCredentialAccess.provisioningFailure(preparation).contains(L10n.tr("重新登录")))
 }

@@ -1,3 +1,4 @@
+import AutoSignLocalization
 //
 //  WindowsAnisetteProvider.swift
 //  AltServer
@@ -100,10 +101,10 @@ enum WindowsAnisetteError: Error, LocalizedError {
     case invalidResponse, unavailable, provisioningFailed, notConfigured
     var errorDescription: String? {
         switch self {
-        case .invalidResponse: "Windows 设备认证服务返回的数据无效；需要支持 Windows 身份的 Anisette v3 服务。"
-        case .unavailable: "Windows 设备认证服务暂不可用，请检查服务地址和网络后重试。"
-        case .provisioningFailed: "Windows 设备认证注册失败；已保留钥匙串凭据，请稍后重试。"
-        case .notConfigured: "请先在签名设置启用所选 Windows 设备认证服务。"
+        case .invalidResponse: L10n.tr("Windows 设备认证服务返回的数据无效；需要支持 Windows 身份的 Anisette v3 服务。")
+        case .unavailable: L10n.tr("Windows 设备认证服务暂不可用，请检查服务地址和网络后重试。")
+        case .provisioningFailed: L10n.tr("Windows 设备认证注册失败；已保留钥匙串凭据，请稍后重试。")
+        case .notConfigured: L10n.tr("请先在签名设置启用所选 Windows 设备认证服务。")
         }
     }
 }

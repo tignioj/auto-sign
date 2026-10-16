@@ -1,3 +1,4 @@
+import AutoSignLocalization
 import Foundation
 
 struct AppSourceCatalog: Codable, Sendable {
@@ -108,7 +109,7 @@ struct AppSourceService: Sendable {
               let scheme = components.scheme?.lowercased(), ["http", "https"].contains(scheme),
               let host = components.host, !host.isEmpty,
               components.user == nil, components.password == nil else {
-            throw AppSourceError.invalid("请输入完整的 HTTP 或 HTTPS 源地址，指向 AltStore / SideStore 的 JSON 文件。")
+            throw AppSourceError.invalid(L10n.tr("请输入完整的 HTTP 或 HTTPS 源地址，指向 AltStore / SideStore 的 JSON 文件。"))
         }
         components.scheme = scheme
         components.host = host.lowercased()
@@ -117,23 +118,23 @@ struct AppSourceService: Sendable {
             components.port = nil
         }
         if components.path.isEmpty { components.path = "/" }
-        guard let url = components.url else { throw AppSourceError.invalid("源地址无效。") }
+        guard let url = components.url else { throw AppSourceError.invalid(L10n.tr("源地址无效。")) }
         return url
     }
 
     static func parseCatalog(_ data: Data) throws -> AppSourceCatalog {
         let catalog: AppSourceCatalog
         do { catalog = try JSONDecoder().decode(AppSourceCatalog.self, from: data) }
-        catch { throw AppSourceError.invalid("无法解析源：请使用 AltStore / SideStore 格式的 JSON。\n\(error.localizedDescription)") }
+        catch { throw AppSourceError.invalid(L10n.tr("无法解析源：请使用 AltStore / SideStore 格式的 JSON。\n\(error.localizedDescription)")) }
         guard !catalog.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
-            throw AppSourceError.invalid("源缺少名称。")
+            throw AppSourceError.invalid(L10n.tr("源缺少名称。"))
         }
         var identifiers = Set<String>()
         for app in catalog.apps {
             guard !app.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
                   !app.bundleIdentifier.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
                   identifiers.insert(app.bundleIdentifier).inserted else {
-                throw AppSourceError.invalid("源中的应用名称或 Bundle ID 为空，或存在重复的 Bundle ID。")
+                throw AppSourceError.invalid(L10n.tr("源中的应用名称或 Bundle ID 为空，或存在重复的 Bundle ID。"))
             }
         }
         return catalog
@@ -175,18 +176,18 @@ struct AppSourceService: Sendable {
 
     static func validateResponse(_ response: URLResponse) throws {
         guard let http = response as? HTTPURLResponse else {
-            throw AppSourceError.invalid("服务器没有返回有效的 HTTP 响应。")
+            throw AppSourceError.invalid(L10n.tr("服务器没有返回有效的 HTTP 响应。"))
         }
         guard (200..<300).contains(http.statusCode) else {
-            throw AppSourceError.invalid("请求失败（HTTP \(http.statusCode)），请检查地址或稍后重试。")
+            throw AppSourceError.invalid(L10n.tr("请求失败（HTTP \(http.statusCode)），请检查地址或稍后重试。"))
         }
     }
 
     static func validateIPA(at url: URL, expectedSize: Int64?) async throws {
         let actualSize = try url.resourceValues(forKeys: [.fileSizeKey]).fileSize ?? 0
-        guard actualSize > 0 else { throw AppSourceError.invalid("下载的 IPA 是空文件。") }
+        guard actualSize > 0 else { throw AppSourceError.invalid(L10n.tr("下载的 IPA 是空文件。")) }
         if let expectedSize, expectedSize > 0, Int64(actualSize) != expectedSize {
-            throw AppSourceError.invalid("下载大小与源记录不一致，请刷新源后重试。")
+            throw AppSourceError.invalid(L10n.tr("下载大小与源记录不一致，请刷新源后重试。"))
         }
         let listing = try await ProcessRunner.run("/usr/bin/unzip", ["-Z1", url.path])
         let containsApp = listing.output.split(separator: "\n").contains { path in
@@ -194,10 +195,10 @@ struct AppSourceService: Sendable {
             return parts.count == 3 && parts[0] == "Payload" && parts[1].hasSuffix(".app") && parts[2] == "Info.plist"
         }
         guard listing.status == 0, containsApp else {
-            throw AppSourceError.invalid("下载内容不是有效的 IPA（缺少 Payload/*.app/Info.plist），可能是网页或不支持的安装格式。")
+            throw AppSourceError.invalid(L10n.tr("下载内容不是有效的 IPA（缺少 Payload/*.app/Info.plist），可能是网页或不支持的安装格式。"))
         }
         let integrity = try await ProcessRunner.run("/usr/bin/unzip", ["-tq", url.path])
-        guard integrity.status == 0 else { throw AppSourceError.invalid("IPA 压缩包损坏，请重新下载。") }
+        guard integrity.status == 0 else { throw AppSourceError.invalid(L10n.tr("IPA 压缩包损坏，请重新下载。")) }
     }
 }
 
@@ -214,16 +215,16 @@ extension AppSourceService {
     }
 
     static func packageMetadata(at url: URL) async throws -> PackageMetadata {
-        let listing = try await ProcessRunner.checked("/usr/bin/unzip", ["-Z1", url.path], context: "无法读取 IPA。")
+        let listing = try await ProcessRunner.checked("/usr/bin/unzip", ["-Z1", url.path], context: L10n.tr("无法读取 IPA。"))
         let paths = listing.output.split(separator: "\n").map(String.init).filter { path in
             let parts = path.split(separator: "/")
             return parts.count == 3 && parts[0] == "Payload" && parts[1].hasSuffix(".app") && parts[2] == "Info.plist"
         }
-        guard paths.count == 1, let path = paths.first else { throw AppSourceError.invalid("IPA 必须包含一个应用。") }
-        let plist = try await ProcessRunner.checked("/usr/bin/unzip", ["-p", url.path, path], context: "无法读取应用信息。")
+        guard paths.count == 1, let path = paths.first else { throw AppSourceError.invalid(L10n.tr("IPA 必须包含一个应用。")) }
+        let plist = try await ProcessRunner.checked("/usr/bin/unzip", ["-p", url.path, path], context: L10n.tr("无法读取应用信息。"))
         guard let info = try PropertyListSerialization.propertyList(from: plist.data, format: nil) as? [String: Any],
               let id = info["CFBundleIdentifier"] as? String, SigningService.isValidBundleIdentifier(id) else {
-            throw AppSourceError.invalid("IPA 的应用标识无效。")
+            throw AppSourceError.invalid(L10n.tr("IPA 的应用标识无效。"))
         }
         return PackageMetadata(bundleIdentifier: id, version: info["CFBundleShortVersionString"] as? String,
                                buildVersion: info["CFBundleVersion"] as? String)

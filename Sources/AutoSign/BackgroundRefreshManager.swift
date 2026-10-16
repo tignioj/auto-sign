@@ -1,3 +1,4 @@
+import AutoSignLocalization
 import Foundation
 import UserNotifications
 
@@ -27,17 +28,17 @@ enum BackgroundRefreshManager {
     }
 
     static var lastStatus: String {
-        let message = UserDefaults.standard.string(forKey: statusKey) ?? "尚未运行后台检查"
+        let message = UserDefaults.standard.string(forKey: statusKey) ?? L10n.tr("尚未运行后台检查")
         guard let date = UserDefaults.standard.object(forKey: dateKey) as? Date else { return message }
-        return "\(date.formatted(date: .abbreviated, time: .shortened)) · \(message)"
+        return "\(L10n.date(date)) · \(message)"
     }
 
     static func install() async throws {
         guard LocalNetworkPreparation.isPrepared() else {
-            throw AutoSignError.command("请先打开 AutoSign，在前台完成本地网络授权与检查，再开启后台自动续签。")
+            throw AutoSignError.command(L10n.tr("请先打开 AutoSign，在前台完成本地网络授权与检查，再开启后台自动续签。"))
         }
         guard let executable = Bundle.main.executableURL else {
-            throw AutoSignError.command("无法定位 AutoSign 可执行文件。")
+            throw AutoSignError.command(L10n.tr("无法定位 AutoSign 可执行文件。"))
         }
         let logs = try applicationSupportURL().appendingPathComponent("Logs", isDirectory: true)
         try FileManager.default.createDirectory(at: logs, withIntermediateDirectories: true)
@@ -52,10 +53,10 @@ enum BackgroundRefreshManager {
         _ = try? await ProcessRunner.run("/bin/launchctl", ["bootout", "\(domain)/\(label)"])
         _ = try await ProcessRunner.checked(
             "/bin/launchctl", ["bootstrap", domain, launchAgentURL.path],
-            context: "无法启动后台自动续签任务。"
+            context: L10n.tr("无法启动后台自动续签任务。")
         )
         UserDefaults.standard.set(true, forKey: "autoRefreshEnabled")
-        record("后台任务已安装，每 30 分钟检查一次")
+        record(L10n.tr("后台任务已安装，每 30 分钟检查一次"))
     }
 
     static func configuration(executable: URL, logs: URL, bundleID: String = Bundle.main.bundleIdentifier ?? "local.autosign.desktop") -> [String: Any] {
@@ -82,7 +83,7 @@ enum BackgroundRefreshManager {
             try FileManager.default.removeItem(at: launchAgentURL)
         }
         UserDefaults.standard.set(false, forKey: "autoRefreshEnabled")
-        record("后台自动续签已关闭")
+        record(L10n.tr("后台自动续签已关闭"))
     }
 
     static func applicationSupportURL() throws -> URL {

@@ -7,13 +7,15 @@
     <key>CFBundleIconFile</key><string>AutoSign.icns</string>
     <key>CFBundleIdentifier</key><string>local.autosign.desktop</string>
     <key>CFBundleInfoDictionaryVersion</key><string>6.0</string>
+    <key>CFBundleDevelopmentRegion</key><string>en</string>
+    <key>CFBundleLocalizations</key><array><string>en</string><string>zh-Hans</string></array>
     <key>CFBundleName</key><string>AutoSign</string>
     <key>CFBundlePackageType</key><string>APPL</string>
-    <key>CFBundleShortVersionString</key><string>1.9.3</string>
-    <key>CFBundleVersion</key><string>17</string>
+    <key>CFBundleShortVersionString</key><string>1.10.0</string>
+    <key>CFBundleVersion</key><string>18</string>
     <key>LSMinimumSystemVersion</key><string>14.0</string>
     <key>NSHighResolutionCapable</key><true/>
-    <key>NSLocalNetworkUsageDescription</key><string>连接同一局域网内的 iPhone / iPad，完成无线安装、手机 Store 连接和后台自动续签。请允许访问，以便无人值守时继续续签。</string>
+    <key>NSLocalNetworkUsageDescription</key><string>Connect to your iPhone or iPad on the local network for wireless installation, AutoSign Store, and automatic background refresh. Allow access to refresh apps unattended.</string>
     <key>NSBonjourServices</key><array><string>_autosign._tcp</string></array>
 </dict>
 </plist>

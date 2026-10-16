@@ -1,3 +1,4 @@
+import AutoSignLocalization
 import Foundation
 import Combine
 
@@ -42,7 +43,7 @@ final class SourceLibraryModel: ObservableObject {
     /// Shared by the Mac UI and authenticated phone API.
     func fetchAndSaveSource(_ input: String, forDeviceOperation: Bool = false) async throws -> SavedAppSource {
         guard !isRefreshing, !isDownloading, !isPerformingDeviceOperation || forDeviceOperation else {
-            throw AppSourceError.invalid("正在处理应用或更新源，请稍后重试。")
+            throw AppSourceError.invalid(L10n.tr("正在处理应用或更新源，请稍后重试。"))
         }
         isRefreshing = true
         defer { isRefreshing = false }
@@ -61,7 +62,7 @@ final class SourceLibraryModel: ObservableObject {
     }
 
     func removeSource(_ input: String) throws {
-        guard !isBusy else { throw AppSourceError.invalid("正在更新源或下载，请稍后重试。") }
+        guard !isBusy else { throw AppSourceError.invalid(L10n.tr("正在更新源或下载，请稍后重试。")) }
         let id = try AppSourceService.sourceURL(from: input).absoluteString
         let updated = sources.filter { $0.id != id }
         try AppSourceStore.save(updated, to: preferences)
@@ -79,7 +80,7 @@ final class SourceLibraryModel: ObservableObject {
             let url = try AppSourceService.sourceURL(from: input)
             if sources.contains(where: { $0.url == url }) {
                 selectedSourceID = url.absoluteString
-                throw AppSourceError.invalid("这个源已经添加，可以点击“刷新源”获取最新版本。")
+                throw AppSourceError.invalid(L10n.tr("这个源已经添加，可以点击“刷新源”获取最新版本。"))
             }
             let catalog = try await service.fetchCatalog(at: url)
             try Task.checkCancellation()
@@ -150,7 +151,7 @@ final class SourceLibraryModel: ObservableObject {
               source.catalog.apps.contains(where: { $0.id == app.id }) else { return nil }
         downloadingAppID = app.id
         errorMessage = nil
-        downloadMessage = "正在检查 \(app.name) 的最新版本…"
+        downloadMessage = L10n.tr("正在检查 \(app.name) 的最新版本…")
         defer {
             downloadingAppID = nil
             downloadTask = nil
@@ -168,13 +169,13 @@ final class SourceLibraryModel: ObservableObject {
                 sourceErrors[source.id] = nil
             }
             guard let latest = catalog.apps.first(where: { $0.id == app.id })?.latestVersion else {
-                throw AppSourceError.invalid("源中已没有这个应用的可下载版本，请刷新应用列表。")
+                throw AppSourceError.invalid(L10n.tr("源中已没有这个应用的可下载版本，请刷新应用列表。"))
             }
-            downloadMessage = "正在下载 \(app.name) \(latest.displayVersion)…"
+            downloadMessage = L10n.tr("正在下载 \(app.name) \(latest.displayVersion)…")
             let directory = try BackgroundRefreshManager.applicationSupportURL()
                 .appendingPathComponent("Downloads", isDirectory: true)
             let url = try await service.download(latest, to: directory)
-            downloadMessage = "已下载 \(app.name) \(latest.displayVersion)，可在下方签名并安装。"
+            downloadMessage = L10n.tr("已下载 \(app.name) \(latest.displayVersion)，可在下方签名并安装。")
             return url
         }
         downloadTask = task
@@ -182,7 +183,7 @@ final class SourceLibraryModel: ObservableObject {
         catch {
             downloadMessage = nil
             if error is CancellationError || (error as? URLError)?.code == .cancelled {
-                downloadMessage = "下载已取消"
+                downloadMessage = L10n.tr("下载已取消")
             } else { errorMessage = error.localizedDescription }
             return nil
         }

@@ -1,3 +1,4 @@
+import AutoSignLocalization
 import Foundation
 import Network
 
@@ -10,33 +11,33 @@ struct StoreHTTPRequest: Sendable {
     static let maximumBytes = 65_536
 
     static func parse(_ data: Data) throws -> StoreHTTPRequest? {
-        guard data.count <= maximumBytes else { throw StoreHTTPError(status: 413, message: "请求过大。") }
+        guard data.count <= maximumBytes else { throw StoreHTTPError(status: 413, message: L10n.tr("请求过大。")) }
         guard let boundary = data.range(of: Data("\r\n\r\n".utf8)) else { return nil }
         guard let text = String(data: data[..<boundary.lowerBound], encoding: .utf8) else {
-            throw StoreHTTPError(status: 400, message: "无效请求头。")
+            throw StoreHTTPError(status: 400, message: L10n.tr("无效请求头。"))
         }
         let lines = text.components(separatedBy: "\r\n")
         let first = (lines.first ?? "").split(separator: " ")
         guard first.count == 3, first[2] == "HTTP/1.1", first[1].hasPrefix("/") else {
-            throw StoreHTTPError(status: 400, message: "无效 HTTP 请求。")
+            throw StoreHTTPError(status: 400, message: L10n.tr("无效 HTTP 请求。"))
         }
         var headers: [String: String] = [:]
         for line in lines.dropFirst() {
             guard let colon = line.firstIndex(of: ":"), colon != line.startIndex else {
-                throw StoreHTTPError(status: 400, message: "无效请求头。")
+                throw StoreHTTPError(status: 400, message: L10n.tr("无效请求头。"))
             }
             let key = line[..<colon].lowercased()
-            guard headers[key] == nil else { throw StoreHTTPError(status: 400, message: "请求头重复。") }
+            guard headers[key] == nil else { throw StoreHTTPError(status: 400, message: L10n.tr("请求头重复。")) }
             headers[key] = String(line[line.index(after: colon)...]).trimmingCharacters(in: .whitespaces)
         }
-        guard headers["transfer-encoding"] == nil else { throw StoreHTTPError(status: 400, message: "不支持分块请求。") }
+        guard headers["transfer-encoding"] == nil else { throw StoreHTTPError(status: 400, message: L10n.tr("不支持分块请求。")) }
         let rawLength = headers["content-length"] ?? "0"
         guard !rawLength.isEmpty, rawLength.allSatisfy({ $0.isASCII && $0.isNumber }),
               let length = Int(rawLength), length <= maximumBytes - boundary.upperBound else {
-            throw StoreHTTPError(status: 413, message: "无效请求长度。")
+            throw StoreHTTPError(status: 413, message: L10n.tr("无效请求长度。"))
         }
         guard data.count >= boundary.upperBound + length else { return nil }
-        guard data.count == boundary.upperBound + length else { throw StoreHTTPError(status: 400, message: "不支持流水线请求。") }
+        guard data.count == boundary.upperBound + length else { throw StoreHTTPError(status: 400, message: L10n.tr("不支持流水线请求。")) }
         return StoreHTTPRequest(method: String(first[0]), path: String(first[1]), headers: headers,
                                 body: Data(data[boundary.upperBound...]))
     }
@@ -104,7 +105,7 @@ final class StoreHTTPConnection {
                     } else if complete || error != nil { self.close() }
                     else { self.receive() }
                 } catch let error as StoreHTTPError { self.send(.error(error.status, error.message)) }
-                catch { self.send(.error(400, "无效请求。")) }
+                catch { self.send(.error(400, L10n.tr("无效请求。"))) }
             }
         }
     }
