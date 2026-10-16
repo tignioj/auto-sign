@@ -8,6 +8,17 @@ swift package resolve
 python3 - <<'PY'
 from pathlib import Path
 import stat
+
+def write_if_changed(path, content):
+    if content == path.read_text():
+        return
+    mode = path.stat().st_mode
+    path.chmod(mode | stat.S_IWUSR)
+    try:
+        path.write_text(content)
+    finally:
+        path.chmod(mode)
+
 p = Path('.build/checkouts/AltSign/Package.swift')
 s = p.read_text()
 patches = [
@@ -32,13 +43,22 @@ if compatibility.is_symlink() or compatibility.exists():
         raise SystemExit('Unexpected OpenSSL compatibility header directory; review before replacing it.')
 else:
     compatibility.symlink_to(headers.resolve(), target_is_directory=True)
-if s != p.read_text():
-    mode = p.stat().st_mode
-    p.chmod(mode | stat.S_IWUSR)
-    try:
-        p.write_text(s)
-    finally:
-        p.chmod(mode)
+write_if_changed(p, s)
+
+# BOOL is a signed char on Intel Macs. The upstream failure callback passes nil
+# (a pointer); use NO only in this Boolean-returning method, not object callbacks.
+api = p.parent / 'AltSign/Apple API/ALTAppleAPI.m'
+source = api.read_text()
+start = source.index('- (void)enableModernFeaturesForAppID:')
+end = source.index('\n- (void)', start + 1)
+method = source[start:end]
+old = 'completionHandler(nil, error);'
+new = 'completionHandler(NO, error);'
+if method.count(old) == 1:
+    method = method.replace(old, new, 1)
+elif old in method or new not in method:
+    raise SystemExit('Pinned AltSign Boolean callback changed; review the Intel compatibility patch.')
+write_if_changed(api, source[:start] + method + source[end:])
 PY
 # AltSign's Swift package needs its bundled corecrypto archive, which AltServer
 # normally supplies from its Xcode workspace. No Apple account is used here.

@@ -2,7 +2,7 @@
 
 AutoSign 是一个原生 macOS 图形工具，用自己的 Apple 开发者身份，为应用源中的 `.ipa` 重新签名并安装到自己的 iPhone 或 iPad。支持跨源批量安装、按设备和应用自动续签，以及通过 [AutoSign Store](https://github.com/tignioj/auto-sign-store) 手机客户端安装、更新和刷新签名。
 
-当前源码版本为 **1.9.1（build 15）**。安装和续签由 Mac 完成，手机端无需输入 Apple ID 或保存签名证书。新增独立 Apple 账号签发，锁屏真机验收需完成本机登录后执行。
+当前源码版本为 **1.9.2（build 16）**。安装和续签由 Mac 完成，手机端无需输入 Apple ID 或保存签名证书。新增独立 Apple 账号签发，锁屏真机验收需完成本机登录后执行。
 
 ## 使用前准备
 
@@ -196,7 +196,7 @@ AutoSign 1.9.0 在“签名设置”提供独立 Apple 账号登录，使用 Alt
 
 本机和自托管设备身份、ADI 数据均保存在钥匙串；不同服务分别保存身份，读取失败不重置。签入后更换服务需先退出并重新登录。组件缓存位于 `AutoSign/Anisette/Libraries/`，不包含账号密码。2026-10-16 已在 macOS 27.0.1、Apple 芯片 Mac 上完成免费账号真实登录，以及插电灭屏、锁屏期间两款 iPhone 应用续签：2/2 成功，均仅更新描述文件并通过设备逐字节读回校验，新有效期均为 168 小时。本机 Windows 服务重启后，全新 AutoSign 进程也在锁屏状态下恢复钥匙串凭据并验证 Apple 会话。详见 [真机验证记录](docs/profile-refresh-verification.md)。其他系统版本、Intel 构建、新账号首次签发证书和新应用安装尚未验证。
 
-构建及测试前运行 `./Scripts/prepare-native-auth.sh`，下载锁定版本的 AltSign / AnisetteKit 并构建认证所需的密码库。该脚本为上游 AltSign 的 CAltSign 和 ldid 静态目标补齐 OpenSSL 依赖，并恢复其 manifest 预期的头文件布局；不修改上游认证实现。随后运行 `swift test` 或 `./Scripts/build-app.sh`。依赖版本固定在 `Package.resolved`。AltSign、AnisetteKit、Unicorn、OpenSSL 与 corecrypto 各自保留其上游许可；分发需同时遵循相应许可与源码要求。
+构建及测试前运行 `./Scripts/prepare-native-auth.sh`，下载锁定版本的 AltSign / AnisetteKit 并构建认证所需的密码库。该脚本为上游 AltSign 的 CAltSign 和 ldid 静态目标补齐 OpenSSL 依赖，恢复其 manifest 预期的头文件布局，并修正一处 Intel 编译器拒绝的 BOOL 失败回调；不改变认证协议。随后运行 `swift test` 或 `./Scripts/build-app.sh`。依赖版本固定在 `Package.resolved`。AltSign、AnisetteKit、Unicorn、OpenSSL 与 corecrypto 各自保留其上游许可；分发需同时遵循相应许可与源码要求。
 
 自托管 Windows 认证服务可在这台 Mac 的 Docker Desktop 中运行：
 
