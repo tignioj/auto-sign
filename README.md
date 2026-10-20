@@ -2,7 +2,7 @@
 
 AutoSign 是一个原生 macOS 图形工具，用自己的 Apple 开发者身份，为应用源中的 `.ipa` 重新签名并安装到自己的 iPhone 或 iPad。支持跨源批量安装、按设备和应用自动续签，以及通过 [AutoSign Store](https://github.com/tignioj/auto-sign-store) 手机客户端安装、更新和刷新签名。
 
-当前源码版本为 **1.10.2（build 20）**。安装和续签由 Mac 完成，手机端无需输入 Apple ID 或保存签名证书。支持简体中文 / English 即时切换，界面及后台续签提示跟随所选语言。独立 Apple 账号签发的锁屏真机验收需完成本机登录后执行。
+当前源码版本为 **1.10.3（build 21）**。安装和续签由 Mac 完成，手机端无需输入 Apple ID 或保存签名证书。支持简体中文 / English 即时切换，界面及后台续签提示跟随所选语言。独立 Apple 账号签发的锁屏真机验收需完成本机登录后执行。
 
 ## 使用前准备
 
@@ -12,6 +12,8 @@ AutoSign 是一个原生 macOS 图形工具，用自己的 Apple 开发者身份
 3. 如果设备尚未完成开发者配对，在 AutoSign 中逐台点击 **发起配对**，保持设备解锁并确认提示。
 4. 在每台设备的 **设置 → 隐私与安全性 → 开发者模式** 中开启开发者模式并重启。
 5. 在 AutoSign 的“签名设置”登录独立 Apple 账号并选择团队，首次安装时自动配置证书和描述文件。兼容模式会读取钥匙串证书及 Xcode 本地未过期、匹配所选设备的描述文件；也可点击 **选择…** 手动指定该团队的 `.mobileprovision`。
+
+**Windows Anisette v3 服务不会随首次安装自动部署。** 如需使用，请先按[本机 Windows Anisette v3 服务](#本机-windows-anisette-v3-服务)的步骤启动并在“签名设置”启用，再登录独立 Apple 账号。应用内“使用指南”也提供完整步骤。
 
 独立账号首次安装使用所选团队，直接向 Apple 为应用和目标设备签发描述文件；Xcode 兼容模式使用所选描述文件确定团队，再经 Xcode 申请。无需事先为源中的每款应用手动下载文件。免费 Personal Team 可用，签名通常有效 7 天。后续续签或升级沿用各应用已保存的标识和团队。
 
@@ -77,7 +79,7 @@ AutoSign 支持 **简体中文 / English**，默认跟随系统语言；其他�
 | 自动续签 | 后台任务和启动验证开关、各设备应用的到期时间与续签记录 |
 | 手机连接 | AutoSign Store 局域网服务、连接地址、配对密钥及源更新检查 |
 | 签名设置 | Xcode 账号状态、签名证书、描述文件 |
-| 使用指南 | 首次使用、无线连接、开发者信任及设备注册说明 |
+| 使用指南 | 首次使用、Windows Anisette v3 服务启动、无线连接、开发者信任及设备注册说明 |
 
 切换页面保留本次应用选择、搜索条件及操作进度。左下角始终显示操作状态，点击可返回安装页；安装页提供设备和签名设置的快捷入口。
 
@@ -208,13 +210,49 @@ AutoSign 1.9.0 在“签名设置”提供独立 Apple 账号登录，使用 Alt
 
 构建及测试前运行 `./Scripts/prepare-native-auth.sh`，下载锁定版本的 AltSign / AnisetteKit 并构建认证所需的密码库。该脚本为上游 AltSign 的 CAltSign 和 ldid 静态目标补齐 OpenSSL 依赖，恢复其 manifest 预期的头文件布局，并修正一处 Intel 编译器拒绝的 BOOL 失败回调；不改变认证协议。随后运行 `swift test` 或 `./Scripts/build-app.sh`。依赖版本固定在 `Package.resolved`。AltSign、AnisetteKit、Unicorn、OpenSSL 与 corecrypto 各自保留其上游许可；分发需同时遵循相应许可与源码要求。
 
-自托管 Windows 认证服务可在这台 Mac 的 Docker Desktop 中运行：
+### 本机 Windows Anisette v3 服务
+
+首次安装 AutoSign 不会自动部署或启用 Windows Anisette v3 服务；未配置时使用本机 AnisetteKit。需要 Windows 认证时，可将服务部署在这台 Mac 的 Docker Desktop 中，无需另一台 Windows 电脑。
+
+#### 首次部署与启用
+
+1. 安装并启动 Docker Desktop，等待 Docker 引擎就绪。
+2. 准备 AutoSign 项目源码。部署脚本与 `SelfHostedAnisette` 文件夹不随 `AutoSign.app` 分发；使用发行版的用户也需先从[项目仓库](https://github.com/tignioj/auto-sign)下载并解压源码。
+3. 在终端进入包含 `Scripts` 和 `SelfHostedAnisette` 文件夹的项目根目录，运行：
 
 ```sh
 ./Scripts/setup-local-anisette.sh
 ```
 
-脚本从 Apple 下载固定版本 iTunes 12.13.11.1，校验安装包及 CoreADI64.dll 的 SHA-256，在本机构建隔离服务。仅发布 `127.0.0.1:6969`，不向局域网开放；随后在 AutoSign 的服务地址填写 `http://127.0.0.1:6969` 并启用。可用 `AUTOSIGN_ANISETTE_PORT` 更换端口。容器不接收 Apple 账号、密码、验证码、开发者令牌或签名私钥；设备认证文件在容器内存目录中临时恢复，请求结束即清理，持久化副本由 AutoSign 保存在 Mac 系统钥匙串。运行服务需保持 Docker Desktop 启动；容器采用 `unless-stopped` 重启策略。通过 `docker stop autosign-anisette-local` 可停止服务，钥匙串凭据保留。Apple 组件只下载到本机构建缓存，不随 AutoSign 应用或仓库分发。
+4. 等待终端显示 `本机 Windows 认证服务已启动：http://127.0.0.1:6969`。
+5. 打开 AutoSign **签名设置 → 设备认证服务**，填写 `http://127.0.0.1:6969` 并点击 **启用此服务**，再登录独立 Apple 账号。已登录时需先退出账号才能更换服务。
+
+脚本从 Apple 下载固定版本 iTunes 12.13.11.1，校验安装包及 CoreADI64.dll 的 SHA-256，在本机构建隔离服务。仅发布 `127.0.0.1:6969`，不向局域网开放。可在运行部署脚本时用 `AUTOSIGN_ANISETTE_PORT` 更换端口，并在 AutoSign 中填写相同端口。Apple 组件只下载到本机构建缓存，不随 AutoSign 应用或仓库分发。
+
+#### 后续启动、停止与排查
+
+运行服务需保持 Docker Desktop 启动；容器采用 `unless-stopped` 重启策略，通常会随 Docker 启动恢复。若曾手动停止容器，启动 Docker Desktop 后运行：
+
+```sh
+docker start autosign-anisette-local
+```
+
+停止服务时运行：
+
+```sh
+docker stop autosign-anisette-local
+```
+
+若 AutoSign 提示服务不可用，先确认 Docker 引擎已就绪，再检查容器状态和服务响应：
+
+```sh
+docker ps -a --filter name=autosign-anisette-local
+curl --fail http://127.0.0.1:6969/v3/client_info
+```
+
+容器已停止时按上面的命令启动；刚启动时等待服务就绪后再重试。自定义端口时，检查命令和 AutoSign 中的地址也需使用对应端口。
+
+停止服务会保留钥匙串凭据。容器不接收 Apple 账号、密码、验证码、开发者令牌或签名私钥；设备认证文件在容器内存目录中临时恢复，请求结束即清理，持久化副本由 AutoSign 保存在 Mac 系统钥匙串。
 
 真实登录后可用 `dist/AutoSign.app/Contents/MacOS/AutoSign --verify-independent-account` 在全新进程中验证钥匙串、本机设备认证和 Apple 会话。输出仅包含状态布尔值、时间及有限的诊断错误，不输出密码、令牌或认证头。
 

@@ -562,3 +562,17 @@
 "；请先通过 AutoSign 安装应用以保存续签记录" = "; install an app through AutoSign first to save refresh records";
 "无法启动 AutoSign" = "Unable to Start AutoSign";
 "无法检查正在运行的实例：{0}" = "Unable to check for a running instance: {0}";
+"在“签名设置”登录独立 Apple 账号并选择团队。如需 Windows 设备认证服务，请先按下方说明启动并启用，再登录账号。使用 Xcode 兼容模式时，在 Xcode 的 Settings → Apple Accounts 登录并确认签名证书与描述文件。" = "Sign in to an Apple account and select a team in Signing Settings. If you need the Windows authentication service, start and enable it using the instructions below before signing in. For Xcode compatibility mode, sign in through Xcode → Settings → Apple Accounts and confirm your signing certificate and provisioning profile.";
+"本机 Windows Anisette v3 服务" = "Local Windows Anisette v3 Service";
+"首次安装不会自动部署此服务，默认使用本机设备认证。需要 Windows Anisette v3 时，可在这台 Mac 的 Docker Desktop 中运行，无需另一台 Windows 电脑。" = "This service is not deployed automatically on first installation. Local device authentication is used by default. If you need Windows Anisette v3, you can run it in Docker Desktop on this Mac without a separate Windows computer.";
+"1. 准备 Docker 与部署脚本" = "1. Prepare Docker and the Setup Script";
+"安装并启动 Docker Desktop，等待引擎就绪。部署脚本位于 AutoSign 项目源码中；仅下载 AutoSign.app 的用户，还需下载并解压项目源码。" = "Install and start Docker Desktop, then wait for its engine to be ready. The setup script is included in the AutoSign project source. If you only downloaded AutoSign.app, download and extract the project source as well.";
+"获取 AutoSign 项目源码" = "Get the AutoSign Project Source";
+"2. 首次部署并启动" = "2. Deploy and Start for the First Time";
+"在终端进入包含 Scripts 文件夹的项目根目录，运行下方命令。脚本会下载并校验 Apple 认证组件、构建容器并启动服务；等待出现“本机 Windows 认证服务已启动”后继续。" = "In Terminal, go to the project root containing the Scripts folder and run the command below. The script downloads and verifies Apple authentication components, builds the container, and starts the service. Continue when it reports that the local Windows authentication service has started; this success message appears in Chinese.";
+"3. 在 AutoSign 中启用" = "3. Enable in AutoSign";
+"打开“签名设置 → 设备认证服务”，填写下方地址并点击“启用此服务”，再登录独立 Apple 账号。已登录时需先退出账号才能更换服务；自定义端口需同步修改地址。" = "Open Signing Settings → Device Authentication Service, enter the URL below, and click Use This Server before signing in to your Apple account. If already signed in, sign out before changing the service. If you chose a custom port, update the URL to match.";
+"后续启动与停止" = "Starting and Stopping Later";
+"使用期间保持 Docker Desktop 运行。容器会随 Docker 启动恢复；如果曾手动停止，启动 Docker 后运行下方第一条命令恢复服务。第二条命令用于停止服务，已保存的钥匙串凭据会保留。" = "Keep Docker Desktop running while using the service. The container resumes when Docker starts. If you stopped it manually, start Docker and run the first command below to resume the service. The second command stops the service and keeps your saved keychain credentials.";
+"提示服务不可用时" = "If the Service Is Unavailable";
+"先确认 Docker Desktop 和 autosign-anisette-local 容器正在运行，等待服务就绪，再检查 AutoSign 中的地址与端口。默认服务仅供这台 Mac 访问。" = "Confirm that Docker Desktop and the autosign-anisette-local container are running, wait for the service to be ready, and check the URL and port in AutoSign. By default, the service is only accessible from this Mac.";

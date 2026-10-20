@@ -562,3 +562,17 @@
 "；请先通过 AutoSign 安装应用以保存续签记录" = "；请先通过 AutoSign 安装应用以保存续签记录";
 "无法启动 AutoSign" = "无法启动 AutoSign";
 "无法检查正在运行的实例：{0}" = "无法检查正在运行的实例：{0}";
+"在“签名设置”登录独立 Apple 账号并选择团队。如需 Windows 设备认证服务，请先按下方说明启动并启用，再登录账号。使用 Xcode 兼容模式时，在 Xcode 的 Settings → Apple Accounts 登录并确认签名证书与描述文件。" = "在“签名设置”登录独立 Apple 账号并选择团队。如需 Windows 设备认证服务，请先按下方说明启动并启用，再登录账号。使用 Xcode 兼容模式时，在 Xcode 的 Settings → Apple Accounts 登录并确认签名证书与描述文件。";
+"本机 Windows Anisette v3 服务" = "本机 Windows Anisette v3 服务";
+"首次安装不会自动部署此服务，默认使用本机设备认证。需要 Windows Anisette v3 时，可在这台 Mac 的 Docker Desktop 中运行，无需另一台 Windows 电脑。" = "首次安装不会自动部署此服务，默认使用本机设备认证。需要 Windows Anisette v3 时，可在这台 Mac 的 Docker Desktop 中运行，无需另一台 Windows 电脑。";
+"1. 准备 Docker 与部署脚本" = "1. 准备 Docker 与部署脚本";
+"安装并启动 Docker Desktop，等待引擎就绪。部署脚本位于 AutoSign 项目源码中；仅下载 AutoSign.app 的用户，还需下载并解压项目源码。" = "安装并启动 Docker Desktop，等待引擎就绪。部署脚本位于 AutoSign 项目源码中；仅下载 AutoSign.app 的用户，还需下载并解压项目源码。";
+"获取 AutoSign 项目源码" = "获取 AutoSign 项目源码";
+"2. 首次部署并启动" = "2. 首次部署并启动";
+"在终端进入包含 Scripts 文件夹的项目根目录，运行下方命令。脚本会下载并校验 Apple 认证组件、构建容器并启动服务；等待出现“本机 Windows 认证服务已启动”后继续。" = "在终端进入包含 Scripts 文件夹的项目根目录，运行下方命令。脚本会下载并校验 Apple 认证组件、构建容器并启动服务；等待出现“本机 Windows 认证服务已启动”后继续。";
+"3. 在 AutoSign 中启用" = "3. 在 AutoSign 中启用";
+"打开“签名设置 → 设备认证服务”，填写下方地址并点击“启用此服务”，再登录独立 Apple 账号。已登录时需先退出账号才能更换服务；自定义端口需同步修改地址。" = "打开“签名设置 → 设备认证服务”，填写下方地址并点击“启用此服务”，再登录独立 Apple 账号。已登录时需先退出账号才能更换服务；自定义端口需同步修改地址。";
+"后续启动与停止" = "后续启动与停止";
+"使用期间保持 Docker Desktop 运行。容器会随 Docker 启动恢复；如果曾手动停止，启动 Docker 后运行下方第一条命令恢复服务。第二条命令用于停止服务，已保存的钥匙串凭据会保留。" = "使用期间保持 Docker Desktop 运行。容器会随 Docker 启动恢复；如果曾手动停止，启动 Docker 后运行下方第一条命令恢复服务。第二条命令用于停止服务，已保存的钥匙串凭据会保留。";
+"提示服务不可用时" = "提示服务不可用时";
+"先确认 Docker Desktop 和 autosign-anisette-local 容器正在运行，等待服务就绪，再检查 AutoSign 中的地址与端口。默认服务仅供这台 Mac 访问。" = "先确认 Docker Desktop 和 autosign-anisette-local 容器正在运行，等待服务就绪，再检查 AutoSign 中的地址与端口。默认服务仅供这台 Mac 访问。";
