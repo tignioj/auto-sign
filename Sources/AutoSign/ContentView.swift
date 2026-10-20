@@ -3,6 +3,7 @@ import SwiftUI
 
 struct ContentView: View {
     @Environment(\.locale) private var locale
+    @Environment(\.openWindow) private var openWindow
     @AppStorage(AppLanguage.preferenceKey) private var language = AppLanguage.system.rawValue
     @ObservedObject var model: AppModel
     @ObservedObject private var sourceLibrary: SourceLibraryModel
@@ -47,6 +48,9 @@ struct ContentView: View {
             }
         }
         .preferredColorScheme(.dark)
+        .onAppear {
+            ApplicationInstance.shared.registerWindowOpener { openWindow(id: "main") }
+        }
         .task { await sourceLibrary.refreshSources() }
         .task {
             if NSApplication.shared.isActive { await prepareInterface() }

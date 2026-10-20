@@ -560,3 +560,5 @@
 "，{0} 个失败，详见处理结果" = "; {0} failed. See the results for details.";
 "；等待设备就绪后在后续检查中重试" = "; waiting for the device to be ready before retrying in a later check";
 "；请先通过 AutoSign 安装应用以保存续签记录" = "; install an app through AutoSign first to save refresh records";
+"无法启动 AutoSign" = "Unable to Start AutoSign";
+"无法检查正在运行的实例：{0}" = "Unable to check for a running instance: {0}";

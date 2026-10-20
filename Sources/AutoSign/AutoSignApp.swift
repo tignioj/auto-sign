@@ -1,4 +1,5 @@
 import AutoSignLocalization
+import Darwin
 import SwiftUI
 
 @main
@@ -8,24 +9,27 @@ struct AutoSignApp: App {
     @StateObject private var model: AppModel
 
     init() {
-        let arguments = ProcessInfo.processInfo.arguments
-        let mode: LaunchMode
-        if arguments.contains("--verify-independent-account") {
-            mode = .verifyIndependentAccount
-        } else if arguments.contains("--background-refresh") {
-            mode = .backgroundRefresh
-        } else if arguments.contains("--install-background-refresh") {
-            mode = .installBackgroundRefresh
-        } else {
-            mode = .interface
+        let mode = LaunchMode(arguments: ProcessInfo.processInfo.arguments)
+        if mode != .interface { NSApplication.shared.setActivationPolicy(.accessory) }
+        do {
+            guard try ApplicationInstance.shared.start(mode: mode) else { exit(EXIT_SUCCESS) }
+        } catch {
+            if mode == .interface {
+                let alert = NSAlert()
+                alert.messageText = L10n.tr("无法启动 AutoSign")
+                alert.informativeText = L10n.tr("无法检查正在运行的实例：\(error.localizedDescription)")
+                alert.runModal()
+            } else {
+                fputs("AutoSign instance check failed: \(error.localizedDescription)\n", stderr)
+            }
+            exit(EXIT_FAILURE)
         }
         launchMode = mode
         _model = StateObject(wrappedValue: AppModel(performInitialRefresh: false))
-        if mode != .interface { NSApplication.shared.setActivationPolicy(.accessory) }
     }
 
     var body: some Scene {
-        WindowGroup {
+        WindowGroup("AutoSign", id: "main") {
             if launchMode == .interface {
                 ContentView(model: model)
                     .environment(\.locale, AppLanguage(rawValue: language)?.locale ?? L10n.locale)
@@ -41,13 +45,6 @@ struct AutoSignApp: App {
             CommandGroup(replacing: .newItem) {}
         }
     }
-}
-
-private enum LaunchMode: Equatable {
-    case interface
-    case backgroundRefresh
-    case installBackgroundRefresh
-    case verifyIndependentAccount
 }
 
 private struct BackgroundTaskView: View {
