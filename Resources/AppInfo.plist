@@ -11,8 +11,8 @@
     <key>CFBundleLocalizations</key><array><string>en</string><string>zh-Hans</string></array>
     <key>CFBundleName</key><string>AutoSign</string>
     <key>CFBundlePackageType</key><string>APPL</string>
-    <key>CFBundleShortVersionString</key><string>1.10.3</string>
-    <key>CFBundleVersion</key><string>21</string>
+    <key>CFBundleShortVersionString</key><string>1.11.0</string>
+    <key>CFBundleVersion</key><string>22</string>
     <key>LSMinimumSystemVersion</key><string>14.0</string>
     <key>NSHighResolutionCapable</key><true/>
     <key>NSLocalNetworkUsageDescription</key><string>Connect to your iPhone or iPad on the local network for wireless installation, AutoSign Store, and automatic background refresh. Allow access to refresh apps unattended.</string>

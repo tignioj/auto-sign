@@ -186,6 +186,8 @@ Mac 保留最近 30 条手机任务；在记录保留期间，相同请求编号
 
 首次安装采用 Mac 当前描述文件的签名团队，为应用生成独立的团队专属 Bundle ID；不会复用 Store 的明确标识覆盖 Store。升级受管理应用保留原标识和团队，后续刷新继续使用已安装版本的原始 IPA。手机不需要输入 Apple ID 或持有证书。两端均需更新；本地构建不更新公开源或 GitHub Release。
 
+安装 AutoSign Store 时，Mac 会在签名前将此次目标设备的 UDID 写入其 `Info.plist` 的 `AutoSignStoreDeviceUDID` 字段，仅处理带 `AutoSignStoreClient = true` 标记的应用。支持此字段的新版 Store 连接后会自动选择本机，仍可手动切换管理其他设备。手动安装、源安装、更新及续签回退覆盖安装均重新写入实际目标；每台设备独立绑定，原始 IPA 保持不变。仅更新描述文件保留原绑定，不会为补绑定强制重装旧 Store。旧客户端与配对接口继续兼容；已有旧 Store 用新版 Mac 覆盖更新后启用自动选择，缺少绑定时保留原有手动选择流程。新版 Store 也会本地保存安装绑定，以兼容旧 Mac 后续覆盖更新。
+
 成功安装后，原始 IPA 和每应用独立描述文件会保存在 `~/Library/Application Support/AutoSign/Store/`，供手动、手机和后台续签共用。没有应用库记录的旧应用需通过 AutoSign 安装一次才能纳入列表；已在应用库中的旧记录兼容迁移，无需专门重装。Store 自身最后处理，优先仅更新描述文件；发生覆盖安装导致手机应用关闭时，Mac 继续执行。有效期延长并通过设备验证后才显示刷新完成，启动检查遵循 Mac 中的开关。
 
 实现参考：AltStore 的 [`FetchProvisioningProfilesOperation`](https://github.com/altstoreio/AltStore/blob/main/AltStore/Operations/FetchProvisioningProfilesOperation.swift) 每次刷新获取新描述文件；[Apple 的自动签名说明](https://developer.apple.com/help/account/provisioning-profiles/edit-download-or-delete-profiles/) 明确指出本地缓存满足条件时 Xcode 不会请求新描述文件。AutoSign 继续使用 Xcode 已登录的账号完成请求，手机无需输入 Apple ID。

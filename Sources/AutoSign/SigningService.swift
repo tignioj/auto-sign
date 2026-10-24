@@ -267,6 +267,9 @@ enum SigningService {
             mainBundleID = replacement
         }
 
+        // Always use the actual installation target, including when updating or
+        // re-signing a saved IPA that was originally prepared for another device.
+        try writeStoreDeviceBinding(at: app, deviceUDID: device.udid)
         await stageChanged(.signing, L10n.tr("正在签名框架与应用主体…"))
         try FileManager.default.copyItemReplacing(profileURL, to: app.appendingPathComponent("embedded.mobileprovision"))
         let allFiles = FileManager.default.enumerator(at: app, includingPropertiesForKeys: nil)?.allObjects as? [URL] ?? []
@@ -375,6 +378,18 @@ enum SigningService {
             .appendingPathComponent("ProvisioningHelper/ProvisioningHelper.xcodeproj")
         if FileManager.default.fileExists(atPath: development.path) { return development }
         throw AutoSignError.command(L10n.tr("AutoSign 应用包中缺少自动续期组件，请重新构建或下载完整版本。"))
+    }
+
+    static func writeStoreDeviceBinding(at bundle: URL, deviceUDID: String) throws {
+        let plist = bundle.appendingPathComponent("Info.plist")
+        let data = try Data(contentsOf: plist)
+        guard var raw = try PropertyListSerialization.propertyList(from: data, options: [], format: nil) as? [String: Any] else {
+            throw AutoSignError.invalidIPA(L10n.tr("无法读取 \(bundle.lastPathComponent) 的应用标识。"))
+        }
+        guard raw["AutoSignStoreClient"] as? Bool == true else { return }
+        raw["AutoSignStoreDeviceUDID"] = deviceUDID
+        let updated = try PropertyListSerialization.data(fromPropertyList: raw, format: .binary, options: 0)
+        try updated.write(to: plist, options: .atomic)
     }
 
     private static func replaceBundleIdentifier(at bundle: URL, with identifier: String) throws {
