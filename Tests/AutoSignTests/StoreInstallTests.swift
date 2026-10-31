@@ -123,6 +123,19 @@ private final class InstallHarness {
     #expect(harness.library.sources.isEmpty)
 }
 
+@Test @MainActor func queuedPhoneInstallationStopsIfDeviceIsRemovedBeforeExecution() async throws {
+    let harness = try InstallHarness()
+    defer { harness.close() }
+    _ = try await harness.library.fetchAndSaveSource("https://source.test/apps.json")
+    let input = StoreInstallRequest(requestID: UUID().uuidString, deviceUDID: "phone",
+        sourceURL: "https://source.test/apps.json", bundleIdentifier: "com.example.demo")
+    let job = try await harness.server.submitInstall(input)
+    try DeviceRemovalStore.remove(udid: "phone", name: "SE3", preferences: harness.preferences)
+    let finished = try await harness.waitForJob(job.id)
+    #expect(finished.state == .failed)
+    #expect(harness.versions.isEmpty)
+}
+
 @Test @MainActor func installPersistsBeforeExecutionFetchesLatestAndRetriesWithoutReinstalling() async throws {
     let harness = try InstallHarness()
     defer { harness.close() }

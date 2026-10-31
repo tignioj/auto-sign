@@ -12,6 +12,25 @@ struct DevicesView: View {
         let _ = locale
         VStack(spacing: 20) {
             deviceSection
+            if !model.removedDevices.isEmpty {
+                AppCard(title: L10n.tr("已移除的设备"), symbol: "archivebox") {
+                    Text(L10n.tr("恢复设备后会重新显示，并恢复移除前的自动续签设置。"))
+                        .font(.caption).foregroundStyle(.secondary)
+                    ForEach(model.removedDevices) { device in
+                        HStack {
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text(device.name).font(.headline)
+                                Text(device.udid).font(.caption.monospaced()).foregroundStyle(.secondary)
+                                    .textSelection(.enabled)
+                            }
+                            Spacer()
+                            Button(L10n.tr("恢复设备")) { Task { await model.restoreDevice(device) } }
+                                .disabled(!model.canManageDevices)
+                        }
+                        .padding(.vertical, 4)
+                    }
+                }
+            }
             AppCard(title: L10n.tr("连接与配对"), symbol: "link") {
                 Text(L10n.tr("首次使用请通过 USB 连接、解锁设备并信任此 Mac。无线使用前，请在 Finder 中启用“连接到 Wi-Fi 时显示此设备”。"))
                     .font(.callout).foregroundStyle(.secondary)
@@ -58,21 +77,28 @@ struct DevicesView: View {
                             ForEach(model.filteredDevices) { device in
                                 VStack(spacing: 8) {
                                     deviceCard(device)
-                                    if !device.isPaired {
-                                        Button { model.pair(device) } label: {
-                                            HStack(spacing: 7) {
-                                                if model.pairingDeviceID == device.id {
-                                                    ProgressView().controlSize(.small)
-                                                } else {
-                                                    Image(systemName: "link")
+                                    HStack {
+                                        if !device.isPaired {
+                                            Button { model.pair(device) } label: {
+                                                HStack(spacing: 7) {
+                                                    if model.pairingDeviceID == device.id {
+                                                        ProgressView().controlSize(.small)
+                                                    } else {
+                                                        Image(systemName: "link")
+                                                    }
+                                                    Text(model.pairingDeviceID == device.id ? L10n.tr("正在配对…") : L10n.tr("发起配对"))
                                                 }
-                                                Text(model.pairingDeviceID == device.id ? L10n.tr("正在配对…") : L10n.tr("发起配对"))
+                                                .frame(maxWidth: .infinity)
                                             }
-                                            .frame(maxWidth: .infinity)
+                                            .buttonStyle(.borderedProminent)
+                                            .tint(.indigo)
+                                            .disabled(model.isBusy)
                                         }
-                                        .buttonStyle(.borderedProminent)
-                                        .tint(.indigo)
-                                        .disabled(model.isBusy)
+                                        Spacer(minLength: 0)
+                                        RemoveDeviceButton(name: device.name, udid: device.udid) {
+                                            model.removeDevice(udid: device.udid, name: device.name)
+                                        }
+                                        .disabled(!model.canManageDevices)
                                     }
                                 }
                                 .frame(width: 250)
@@ -84,6 +110,8 @@ struct DevicesView: View {
                         developerModeNotice
                     }
                 }
+                Text(L10n.tr("移除设备会停止其自动续签，并从 Mac 和手机 Store 的设备列表隐藏；应用资料和系统配对保留，可随时恢复。"))
+                    .font(.caption).foregroundStyle(.secondary)
             }
         }
     }
@@ -152,4 +180,25 @@ struct DevicesView: View {
             .frame(maxWidth: .infinity).padding(20).background(.white.opacity(0.03), in: RoundedRectangle(cornerRadius: 12))
     }
 
+}
+
+struct RemoveDeviceButton: View {
+    @Environment(\.locale) private var locale
+    let name: String
+    let udid: String
+    let onRemove: () -> Void
+    @State private var isConfirming = false
+
+    var body: some View {
+        let _ = locale
+        Button(role: .destructive) { isConfirming = true } label: {
+            Label(L10n.tr("移除设备"), systemImage: "trash")
+        }
+        .confirmationDialog(L10n.tr("移除设备“\(name)”？"), isPresented: $isConfirming, titleVisibility: .visible) {
+            Button(L10n.tr("移除设备"), role: .destructive, action: onRemove)
+            Button(L10n.tr("取消"), role: .cancel) {}
+        } message: {
+            Text(L10n.tr("设备标识：\(udid)\n移除后停止自动续签，应用资料和系统配对保留。可在“已移除的设备”中恢复。"))
+        }
+    }
 }

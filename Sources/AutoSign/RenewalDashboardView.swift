@@ -46,6 +46,10 @@ struct RenewalDashboardView: View {
                             Text(status.name).font(.headline)
                             Spacer()
                             Text(L10n.stored(status.state)).foregroundStyle(status.failure == nil ? Color.cyan : Color.orange)
+                            RemoveDeviceButton(name: status.name, udid: status.id) {
+                                model.removeDevice(udid: status.id, name: status.name)
+                            }
+                            .disabled(!model.canManageDevices)
                         }
                         Text(L10n.tr("最近记录：\(dateText(status.updatedAt))  ·  最近成功：\(dateText(status.lastSuccess))"))
                         if let apps = model.appRenewalStatuses[status.id], !apps.isEmpty {

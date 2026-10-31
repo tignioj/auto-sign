@@ -576,3 +576,12 @@
 "使用期间保持 Docker Desktop 运行。容器会随 Docker 启动恢复；如果曾手动停止，启动 Docker 后运行下方第一条命令恢复服务。第二条命令用于停止服务，已保存的钥匙串凭据会保留。" = "Keep Docker Desktop running while using the service. The container resumes when Docker starts. If you stopped it manually, start Docker and run the first command below to resume the service. The second command stops the service and keeps your saved keychain credentials.";
 "提示服务不可用时" = "If the Service Is Unavailable";
 "先确认 Docker Desktop 和 autosign-anisette-local 容器正在运行，等待服务就绪，再检查 AutoSign 中的地址与端口。默认服务仅供这台 Mac 访问。" = "Confirm that Docker Desktop and the autosign-anisette-local container are running, wait for the service to be ready, and check the URL and port in AutoSign. By default, the service is only accessible from this Mac.";
+"已移除的设备" = "Removed Devices";
+"恢复设备后会重新显示，并恢复移除前的自动续签设置。" = "Restoring a device shows it again and restores its previous automatic refresh setting.";
+"恢复设备" = "Restore Device";
+"移除设备" = "Remove Device";
+"移除设备“{0}”？" = "Remove device “{0}”?";
+"设备标识：{0}\n移除后停止自动续签，应用资料和系统配对保留。可在“已移除的设备”中恢复。" = "Device identifier: {0}\nRemoval stops automatic refresh and keeps saved app data and system pairing. You can restore it under Removed Devices.";
+"移除设备会停止其自动续签，并从 Mac 和手机 Store 的设备列表隐藏；应用资料和系统配对保留，可随时恢复。" = "Removing a device stops automatic refresh and hides it from device lists on the Mac and in Store. Saved app data and system pairing are kept, and you can restore it at any time.";
+"已移除设备 {0}，可在设备管理中恢复" = "Removed device {0}. You can restore it in Devices.";
+"此设备已移除，请先在 Mac 的设备管理中恢复。" = "This device has been removed. Restore it in Devices on the Mac first.";

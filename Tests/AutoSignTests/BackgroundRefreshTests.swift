@@ -119,6 +119,32 @@ import Testing
     #expect(try harness.status("later").expiration == harness.now.addingTimeInterval(86_401))
 }
 
+@Test @MainActor func backgroundSkipsRemovedDevicesEvenWithStaleRenewalTargets() async throws {
+    let harness = try BackgroundHarness()
+    defer { harness.cleanUp() }
+    DeviceSelectionStore.save(["phone", "tablet"], to: harness.preferences)
+    harness.devices.append(harness.device("tablet"))
+    harness.records = [harness.record("phone-app"), harness.record("tablet-app", device: "tablet")]
+    try DeviceRemovalStore.remove(udid: "phone", name: "SE3", preferences: harness.preferences)
+    DeviceSelectionStore.save(["phone", "tablet"], to: harness.preferences) // A stale process wrote the old targets.
+    await harness.run()
+    #expect(harness.calls.map(\.app.id) == ["tablet-app"])
+    #expect(RefreshStatusStore.load("phone", preferences: harness.preferences) == nil)
+}
+
+@Test @MainActor func backgroundRechecksDeviceRemovalAfterDiscoveryHasStarted() async throws {
+    let harness = try BackgroundHarness()
+    defer { harness.cleanUp() }
+    harness.records = [harness.record("due")]
+    harness.onRead = { read in
+        if read == 2 {
+            try DeviceRemovalStore.remove(udid: "phone", name: "SE3", preferences: harness.preferences)
+        }
+    }
+    await harness.run()
+    #expect(harness.calls.isEmpty)
+}
+
 @Test @MainActor func backgroundTreatsSameAppOnDifferentDevicesIndependently() async throws {
     let harness = try BackgroundHarness()
     defer { harness.cleanUp() }

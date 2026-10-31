@@ -2,8 +2,8 @@ import AutoSignLocalization
 import Foundation
 
 enum DeviceService {
-    static func connectedDevices() async throws -> [AppleDevice] {
-        let devices = try await listedDevices()
+    static func connectedDevices(excluding removedUDIDs: Set<String> = DeviceRemovalStore.removedUDIDs()) async throws -> [AppleDevice] {
+        let devices = try await listedDevices().filter { !removedUDIDs.contains($0.udid) }
 
         // `devicectl list devices` is a passive snapshot. A paired Wi-Fi device can be
         // reachable even while its on-demand developer tunnel is idle, in which case
@@ -32,7 +32,7 @@ enum DeviceService {
 
         _ = try await ProcessRunner.checked(
             "/usr/bin/xcrun",
-            ["devicectl", "list", "devices", "--json-output", jsonURL.path, "--quiet"],
+            ["devicectl", "list", "devices", "--timeout", "30", "--json-output", jsonURL.path, "--quiet"],
             context: L10n.tr("无法读取设备。请确认已安装 Xcode。")
         )
         return try parseDevices(from: Data(contentsOf: jsonURL))
@@ -48,7 +48,7 @@ enum DeviceService {
             [
                 "devicectl", "device", "info", "details",
                 "--device", device.id,
-                "--timeout", "15",
+                "--timeout", "30",
                 "--json-output", jsonURL.path,
                 "--quiet"
             ]
@@ -73,21 +73,43 @@ enum DeviceService {
     }
 
     private static func makeDevice(from item: DeviceItem) -> AppleDevice? {
-        guard item.hardwareProperties.platform == "iOS",
-              item.hardwareProperties.reality == "physical",
-              let type = DeviceKind(rawValue: item.hardwareProperties.deviceType),
-              let udid = item.hardwareProperties.udid else { return nil }
+        // Xcode 27.2 moves device data into `properties`. Prefer those fields,
+        // falling back individually while older Xcode versions remain supported.
+        let hardware = item.properties?.hardware
+        let legacyHardware = item.hardwareProperties
+        let platform = hardware?.platform ?? legacyHardware?.platform
+        let reality = hardware?.reality ?? legacyHardware?.reality
+        guard platform == "iOS",
+              let deviceType = hardware?.deviceType ?? legacyHardware?.deviceType,
+              let type = DeviceKind(rawValue: deviceType),
+              let identifier = item.identifier, !identifier.isEmpty,
+              let udid = hardware?.udid ?? legacyHardware?.udid, !udid.isEmpty else { return nil }
+
+        // Idle paired devices can lack `reality` until their tunnel is opened.
+        // Physical UDIDs use these two formats; simulator UDIDs are UUIDs.
+        guard reality == "physical" || (reality == nil && udid.range(
+            of: "^(?:[0-9A-Fa-f]{8}-[0-9A-Fa-f]{16}|[0-9A-Fa-f]{40})$",
+            options: .regularExpression
+        ) != nil) else { return nil }
+
+        let marketingName = hardware?.marketingName ?? legacyHardware?.marketingName
+            ?? hardware?.productType ?? legacyHardware?.productType ?? type.rawValue
+        let state = item.properties?.state
+        let connection = item.properties?.connection
+        let isConnected = (connection?.state ?? item.connectionProperties?.tunnelState) == "connected"
         return AppleDevice(
-            id: item.identifier,
+            id: identifier,
             udid: udid,
-            name: item.deviceProperties.name,
-            marketingName: item.hardwareProperties.marketingName ?? item.hardwareProperties.productType ?? type.rawValue,
+            name: state?.name ?? item.deviceProperties?.name ?? marketingName,
+            marketingName: marketingName,
             kind: type,
-            osVersion: item.deviceProperties.osVersionNumber ?? L10n.tr("未知版本"),
-            isPaired: item.connectionProperties.pairingState == "paired"
-                || item.connectionProperties.tunnelState == "connected",
-            developerModeEnabled: item.deviceProperties.developerModeStatus == "enabled",
-            isConnected: item.connectionProperties.tunnelState == "connected"
+            osVersion: item.properties?.software?.osVersionNumber?.stringValue
+                ?? item.deviceProperties?.osVersionNumber ?? L10n.tr("未知版本"),
+            isPaired: (connection?.pairingState ?? item.connectionProperties?.pairingState) == "paired"
+                || isConnected,
+            developerModeEnabled: state?.developerModeStatus?.isEnabled
+                ?? (item.deviceProperties?.developerModeStatus == "enabled"),
+            isConnected: isConnected
         )
     }
 
@@ -118,21 +140,55 @@ private struct DeviceDetailsResponse: Decodable {
 }
 
 private struct DeviceItem: Decodable {
-    let identifier: String
-    let deviceProperties: DeviceProperties
-    let hardwareProperties: HardwareProperties
-    let connectionProperties: ConnectionProperties
+    let identifier: String?
+    let properties: Properties?
+    let deviceProperties: DeviceProperties?
+    let hardwareProperties: HardwareProperties?
+    let connectionProperties: ConnectionProperties?
+
+    struct Properties: Decodable {
+        let hardware: HardwareProperties?
+        let connection: ConnectionProperties?
+        let state: StateProperties?
+        let software: SoftwareProperties?
+    }
+
+    struct StateProperties: Decodable {
+        let name: String?
+        let developerModeStatus: DeveloperModeStatus?
+    }
+
+    struct SoftwareProperties: Decodable {
+        let osVersionNumber: VersionNumber?
+
+        struct VersionNumber: Decodable { let stringValue: String }
+    }
+
+    struct DeveloperModeStatus: Decodable {
+        let isEnabled: Bool
+
+        private enum CodingKeys: String, CodingKey { case enabled }
+
+        init(from decoder: Decoder) throws {
+            if let status = try? decoder.singleValueContainer().decode(String.self) {
+                isEnabled = status == "enabled"
+            } else {
+                let container = try decoder.container(keyedBy: CodingKeys.self)
+                isEnabled = try container.contains(.enabled) && !container.decodeNil(forKey: .enabled)
+            }
+        }
+    }
 
     struct DeviceProperties: Decodable {
-        let name: String
+        let name: String?
         let osVersionNumber: String?
         let developerModeStatus: String?
     }
 
     struct HardwareProperties: Decodable {
-        let deviceType: String
+        let deviceType: String?
         let marketingName: String?
-        let platform: String
+        let platform: String?
         let productType: String?
         let reality: String?
         let udid: String?
@@ -140,6 +196,7 @@ private struct DeviceItem: Decodable {
 
     struct ConnectionProperties: Decodable {
         let pairingState: String?
+        let state: String?
         let tunnelState: String?
     }
 }

@@ -135,10 +135,11 @@ final class StoreServer: ObservableObject {
             devices = try await devicesProvider()
             lastDeviceCheck = Date()
         }
-        let records = try recordsProvider()
+        let removedUDIDs = DeviceRemovalStore.removedUDIDs(from: preferences)
+        let records = try recordsProvider().filter { !removedUDIDs.contains($0.app.deviceUDID) }
         let updates = await StoreUpdateDetector.updates(records: records, sources: sourceLibrary.sources)
         return StoreSnapshot(protocolVersion: 1, serverName: Host.current().localizedName ?? "AutoSign Mac",
-            devices: devices.filter(\.isPaired).map {
+            devices: devices.filter { $0.isPaired && !removedUDIDs.contains($0.udid) }.map {
                 StoreDevice(id: $0.udid, name: $0.name, model: $0.marketingName, isConnected: $0.isConnected, isReady: $0.isReadyForInstallation)
             }, apps: records.map(\.app), recentJobs: jobs, capabilities: ["sources", "install", "updates", "profile-refresh"],
             availableUpdates: updates, sourceCheck: sourceLibrary.checkStatus)
@@ -210,6 +211,7 @@ final class StoreServer: ObservableObject {
     }
 
     func submit(_ input: RefreshRequest) throws -> RefreshJob {
+        try requireActiveDevice(input.deviceUDID)
         let plan = try StoreJobPlanner.plan(input, records: recordsProvider(), jobs: jobs, isBusy: isBusy)
         if plan.isExisting { return plan.job }
         let job = plan.job
@@ -229,9 +231,11 @@ final class StoreServer: ObservableObject {
     }
 
     func submitInstall(_ input: StoreInstallRequest) async throws -> RefreshJob {
+        try requireActiveDevice(input.deviceUDID)
         if let existing = try StoreJobPlanner.existingInstall(input, jobs: jobs) { return existing }
         guard !sourceLibrary.isBusy else { throw StoreHTTPError(status: 409, message: L10n.tr("Mac 正在更新源或下载，请稍后重试。")) }
         let available = try await devicesProvider()
+        try requireActiveDevice(input.deviceUDID)
         let job = try StoreJobPlanner.planInstall(input, sources: sourceLibrary.sources, devices: available, jobs: jobs, isBusy: isBusy)
         // Device discovery yields; a concurrent request may have persisted this request in the meantime.
         if jobs.contains(where: { $0.id == job.id }) { return job }
@@ -251,6 +255,7 @@ final class StoreServer: ObservableObject {
 
     private func executeInstall(jobID: String, input: StoreInstallRequest) async {
         do {
+            try requireActiveDevice(input.deviceUDID)
             try update(jobID, index: 0, state: .running, message: L10n.tr("正在检查源中的最新版本…"))
             let source = try await sourceLibrary.fetchAndSaveSource(input.sourceURL)
             guard let version = source.catalog.apps.first(where: { $0.id == input.bundleIdentifier })?.latestVersion else {
@@ -260,6 +265,7 @@ final class StoreServer: ObservableObject {
                 self?.updateProgress(jobID, index: 0, message: message)
             }
             let expiration: Date
+            try requireActiveDevice(input.deviceUDID)
             if let installExecutor { expiration = try await installExecutor(input, version, progress) }
             else { expiration = try await StoreInstallService.install(input, version: version, preferences: preferences, statusChanged: progress) }
             try update(jobID, index: 0, state: .completed, message: L10n.tr("已安装 \(version.displayVersion)，可在“我的应用”续签"), expiration: expiration)
@@ -271,12 +277,14 @@ final class StoreServer: ObservableObject {
     }
 
     func submitUpdates(_ input: RefreshRequest) async throws -> RefreshJob {
+        try requireActiveDevice(input.deviceUDID)
         if let existing = try StoreJobPlanner.existingUpdate(input, jobs: jobs) { return existing }
         guard !isBusy, !sourceLibrary.isBusy else { throw StoreHTTPError(status: 409, message: L10n.tr("Mac 正在处理应用任务，请稍后重试。")) }
         // Reserve the worker before device discovery or legacy IPA inspection can yield.
         isBusy = true
         do {
             let available = try await devicesProvider()
+            try requireActiveDevice(input.deviceUDID)
             guard available.contains(where: { $0.udid == input.deviceUDID && $0.isPaired && $0.isReadyForInstallation }) else {
                 throw StoreHTTPError(status: 400, message: L10n.tr("所选设备未配对或尚未就绪。"))
             }
@@ -300,6 +308,7 @@ final class StoreServer: ObservableObject {
     private func executeUpdates(jobID: String, records: [StoreRecord], updates: [StoreAppUpdate]) async {
         for (index, planned) in records.enumerated() {
             do {
+                try requireActiveDevice(planned.app.deviceUDID)
                 guard let record = try recordsProvider().first(where: { $0.app.id == planned.app.id }),
                       let target = updates.first(where: { $0.id == record.app.id }),
                       sourceLibrary.sources.contains(where: { $0.id == target.sourceURL }) else {
@@ -325,6 +334,7 @@ final class StoreServer: ObservableObject {
                     self?.updateProgress(jobID, index: index, message: message)
                 }
                 let expiration: Date
+                try requireActiveDevice(input.deviceUDID)
                 if let installExecutor { expiration = try await installExecutor(input, version, progress) }
                 else { expiration = try await StoreInstallService.install(input, version: version, preferences: preferences, updating: record, statusChanged: progress) }
                 try update(jobID, index: index, state: .completed, message: L10n.tr("已更新至 \(version.displayVersion)"), expiration: expiration)
@@ -341,6 +351,7 @@ final class StoreServer: ObservableObject {
             do {
                 try update(jobID, index: index, state: .running, message: L10n.tr("正在连接设备…"))
                 let available = try await devicesProvider()
+                try requireActiveDevice(record.app.deviceUDID)
                 guard let device = available.first(where: { $0.udid == record.app.deviceUDID && $0.isReadyForInstallation }) else {
                     throw AutoSignError.command(L10n.tr("设备不可用。请解锁设备，检查 Wi-Fi、USB 配对及开发者模式。"))
                 }
@@ -359,6 +370,12 @@ final class StoreServer: ObservableObject {
             }
         }
         lastDeviceCheck = .distantPast
+    }
+
+    private func requireActiveDevice(_ udid: String) throws {
+        guard !DeviceRemovalStore.removedUDIDs(from: preferences).contains(udid) else {
+            throw StoreHTTPError(status: 400, message: L10n.tr("此设备已移除，请先在 Mac 的设备管理中恢复。"))
+        }
     }
 
     private func updateProgress(_ jobID: String, index: Int, message: String) {

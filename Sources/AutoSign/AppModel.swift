@@ -6,6 +6,7 @@ import Foundation
 final class AppModel: ObservableObject {
     @Published var deviceKind: DeviceKind = .iPhone
     @Published var devices: [AppleDevice] = []
+    @Published private(set) var removedDevices: [RemovedDevice]
     @Published private(set) var selectedDeviceID: String?
     @Published private(set) var selectedApps: [SourceAppSelection] = []
     @Published private(set) var managedApps: [String: StoreRecord] = [:]
@@ -39,7 +40,8 @@ final class AppModel: ObservableObject {
         autoRefreshEnabled = BackgroundRefreshManager.isInstalled
         lastBackgroundStatus = BackgroundRefreshManager.lastStatus
         nextBackgroundCheck = (preferences.object(forKey: "backgroundCheckStarted") as? Date)?.addingTimeInterval(RefreshStatusStore.interval)
-        let targets = DeviceSelectionStore.load(from: preferences)
+        let removedUDIDs = DeviceRemovalStore.removedUDIDs(from: preferences)
+        let targets = DeviceSelectionStore.load(from: preferences).filter { !removedUDIDs.contains($0) }
         do {
             let records = try dependencies.records().filter { targets.contains($0.app.deviceUDID) }
             appRenewalStatuses = Dictionary(grouping: records, by: { $0.app.deviceUDID }).mapValues { records in
@@ -98,6 +100,7 @@ final class AppModel: ObservableObject {
     var filteredDevices: [AppleDevice] { devices.filter { $0.kind == deviceKind } }
     var selectedDevice: AppleDevice? { devices.first { $0.id == selectedDeviceID } }
     var isBusy: Bool { stage.isRunning || pairingDeviceID != nil || isRefreshing }
+    var canManageDevices: Bool { !isBusy && !sourceLibrary.isBusy && !isChangingAutoRefresh }
     var completedAppCount: Int { operationItems.filter { $0.state == .completed }.count }
     var canInstall: Bool {
         selectedDevice?.isReadyForInstallation == true && !selectedApps.isEmpty
@@ -121,6 +124,7 @@ final class AppModel: ObservableObject {
         self.preferences = preferences
         self.sourceLibrary = sourceLibrary ?? .shared
         self.dependencies = dependencies
+        removedDevices = DeviceRemovalStore.load(from: preferences)
         if let path = preferences.string(forKey: "profilePath"), FileManager.default.fileExists(atPath: path) {
             profileURL = URL(fileURLWithPath: path)
         }
@@ -130,6 +134,9 @@ final class AppModel: ObservableObject {
 
     func updateDevices(_ available: [AppleDevice]) {
         guard !stage.isRunning else { return }
+        removedDevices = DeviceRemovalStore.load(from: preferences)
+        let removedUDIDs = Set(removedDevices.map(\.udid))
+        let available = available.filter { !removedUDIDs.contains($0.udid) }
         let previousUDID = selectedDevice?.udid
         let desiredUDID = previousUDID ?? preferences.string(forKey: Self.selectedDevicePreferenceKey)
             ?? (didInitializeDeviceSelection ? nil : DeviceSelectionStore.load(from: preferences).first)
@@ -158,7 +165,8 @@ final class AppModel: ObservableObject {
         isRefreshing = true
         defer { isRefreshing = false }
         do {
-            async let foundDevices = DeviceService.connectedDevices()
+            let removedUDIDs = DeviceRemovalStore.removedUDIDs(from: preferences)
+            async let foundDevices = DeviceService.connectedDevices(excluding: removedUDIDs)
             async let foundIdentities = SigningService.identities()
             let available = try await foundDevices
             identities = try await foundIdentities
@@ -206,6 +214,43 @@ final class AppModel: ObservableObject {
             ? L10n.tr("已选择 \(device.name)，请选择要安装或续签的应用")
             : L10n.tr("已选择 \(device.name)：\(device.statusText)")
         Task { await refreshDashboard() }
+    }
+
+    func removeDevice(udid: String, name: String) {
+        guard canManageDevices, !udid.isEmpty else { return }
+        do {
+            try DeviceRemovalStore.remove(udid: udid, name: name, preferences: preferences)
+            if selectedDevice?.udid == udid || preferences.string(forKey: Self.selectedDevicePreferenceKey) == udid {
+                selectedDeviceID = nil
+                preferences.removeObject(forKey: Self.selectedDevicePreferenceKey)
+                profileOnlyRefresh = false
+                managedApps = [:]
+                availableUpdates = []
+                clearAppSelection()
+            }
+            // Removing the current device leaves selection empty until the user chooses another one.
+            didInitializeDeviceSelection = true
+            devices.removeAll { $0.udid == udid }
+            removedDevices = DeviceRemovalStore.load(from: preferences)
+            renewalStatuses.removeAll { $0.id == udid }
+            appRenewalStatuses.removeValue(forKey: udid)
+            detail = L10n.tr("已移除设备 \(name)，可在设备管理中恢复")
+        } catch {
+            stage = .failed(error.localizedDescription)
+            detail = error.localizedDescription
+        }
+    }
+
+    func restoreDevice(_ device: RemovedDevice) async {
+        guard canManageDevices else { return }
+        do {
+            try DeviceRemovalStore.restore(device.udid, preferences: preferences)
+            removedDevices = DeviceRemovalStore.load(from: preferences)
+            await refresh()
+        } catch {
+            stage = .failed(error.localizedDescription)
+            detail = error.localizedDescription
+        }
     }
 
     func isAppSelected(_ app: SourceApp, in source: SavedAppSource) -> Bool {

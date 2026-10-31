@@ -6,7 +6,7 @@ import CryptoKit
 enum StoreInstallService {
     static func install(_ input: StoreInstallRequest, version: SourceAppVersion, preferences: UserDefaults, updating record: StoreRecord? = nil,
                         statusChanged: @escaping @MainActor @Sendable (String) -> Void) async throws -> Date {
-        let available = try await DeviceService.connectedDevices()
+        let available = try await DeviceService.connectedDevices(excluding: DeviceRemovalStore.removedUDIDs(from: preferences))
         guard let device = available.first(where: { $0.udid == input.deviceUDID && $0.isReadyForInstallation }) else {
             throw AutoSignError.command(L10n.tr("设备不可用。请解锁设备，检查 Wi-Fi、USB 配对及开发者模式。"))
         }

@@ -33,7 +33,8 @@ enum BackgroundRefreshCoordinator {
     static func run(preferences: UserDefaults = .standard, now: Date = Date(),
                     dependencies: Dependencies = Dependencies()) async {
         preferences.set(now, forKey: "backgroundCheckStarted")
-        let targets = DeviceSelectionStore.load(from: preferences)
+        let removedUDIDs = DeviceRemovalStore.removedUDIDs(from: preferences)
+        let targets = DeviceSelectionStore.load(from: preferences).filter { !removedUDIDs.contains($0) }
         guard !targets.isEmpty else {
             dependencies.log(L10n.tr("等待用户选择自动续签设备"))
             return
@@ -60,6 +61,9 @@ enum BackgroundRefreshCoordinator {
                     guard let current = try dependencies.records().first(where: {
                         $0.app.id == app.id && $0.app.deviceUDID == udid
                     }) else { continue }
+                    // The GUI may remove a device during discovery or while another app is refreshing.
+                    guard DeviceSelectionStore.load(from: preferences).contains(udid),
+                          !DeviceRemovalStore.removedUDIDs(from: preferences).contains(udid) else { continue }
                     app = current.app
                     summaries[udid]?.expirations[app.id] = app.expiration
                     guard app.expiration <= now.addingTimeInterval(renewalWindow) else {
@@ -106,6 +110,7 @@ enum BackgroundRefreshCoordinator {
             }
 
             for udid in targets {
+                guard !DeviceRemovalStore.removedUDIDs(from: preferences).contains(udid) else { continue }
                 guard let summary = summaries[udid] else { continue }
                 let expiration = summary.expirations.values.min()
                 let errors = summary.failures + summary.waitingReasons
@@ -136,6 +141,7 @@ enum BackgroundRefreshCoordinator {
             dependencies.log(L10n.tr("后台检查已取消，下次检查将继续处理到期应用"))
         } catch {
             for udid in targets {
+                guard !DeviceRemovalStore.removedUDIDs(from: preferences).contains(udid) else { continue }
                 RefreshStatusStore.record(udid, state: L10n.tr("后台检查失败"), failure: error.localizedDescription, preferences: preferences)
             }
             dependencies.log(L10n.tr("自动续签失败：\(error.localizedDescription)"))
