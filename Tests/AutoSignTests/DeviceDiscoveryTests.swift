@@ -117,6 +117,72 @@ func discoversIdlePhysicalDevicesWithoutReality(productType: String) throws {
     }
 }
 
+@Test func verifiesCachedConnectedDevicesAndKeepsFailedProbesOffline() async throws {
+    let cached = try #require(DeviceService.parseDevices(from: discoveryList([discoveryDevice()])).first)
+    var idle = cached
+    idle.isConnected = false
+    let result = await DeviceService.verifiedDevices([cached, idle]) { _ in nil }
+    #expect(result.count == 2)
+    #expect(result.allSatisfy { !$0.isConnected })
+    #expect(result.allSatisfy { !$0.isReadyForInstallation })
+}
+
+@Test func verifiedDiscoveryNeverReplacesTheTargetWithAnotherDevice() async throws {
+    let device = try #require(DeviceService.parseDevices(from: discoveryList([discoveryDevice()])).first)
+    let other = try #require(DeviceService.parseDevices(from: discoveryList([discoveryDevice(index: 1)])).first)
+    let result = await DeviceService.verifiedDevices([device]) { _ in other }
+    #expect(result.first?.udid == device.udid)
+    #expect(result.first?.isConnected == false)
+}
+
+@Test(arguments: [true, false])
+func liveResponseProvesReachabilityDespiteCachedDisconnectedDetails(locked: Bool) async throws {
+    let item = discoveryDevice()
+    let device = try #require(DeviceService.parseDevices(from: discoveryList([item])).first)
+    var cached = item
+    var properties = try #require(cached["properties"] as? [String: Any])
+    properties["connection"] = ["pairingState": "paired", "state": "disconnected"]
+    cached["properties"] = properties
+    let replies = ProbeReplies(live: try JSONSerialization.data(withJSONObject: ["result": [
+        "deviceIdentifier": device.id, "passcodeRequired": locked
+    ]]), details: try JSONSerialization.data(withJSONObject: ["result": cached]))
+    let result = await DeviceService.probeConnection(to: device, query: { try await replies.query($0) })
+    let verified = try #require(result)
+    #expect(verified.udid == device.udid && verified.isReadyForInstallation)
+    let calls = await replies.arguments
+    #expect(calls.map { $0[2] } == ["lockState", "details"])
+    #expect(calls.allSatisfy { $0.contains(device.udid) && !$0.contains(device.id) })
+}
+
+@Test func failedLiveProbeNeverAcceptsCachedConnectionState() async throws {
+    let item = discoveryDevice()
+    let device = try #require(DeviceService.parseDevices(from: discoveryList([item])).first)
+    let replies = ProbeReplies(live: Data(#"{"info":{"outcome":"failed"},"result":{}}"#.utf8),
+                               details: try JSONSerialization.data(withJSONObject: ["result": item]))
+    let result = await DeviceService.probeConnection(to: device, query: { try await replies.query($0) })
+    #expect(result == nil)
+    #expect(await replies.arguments.count == 1)
+}
+
+@Test func liveProbeRejectsAReplyFromAnotherCoreDevice() async throws {
+    let item = discoveryDevice()
+    let device = try #require(DeviceService.parseDevices(from: discoveryList([item])).first)
+    let replies = ProbeReplies(live: Data(#"{"result":{"deviceIdentifier":"another-device","passcodeRequired":true}}"#.utf8),
+                               details: try JSONSerialization.data(withJSONObject: ["result": item]))
+    #expect(await DeviceService.probeConnection(to: device, query: { try await replies.query($0) }) == nil)
+}
+
+private actor ProbeReplies {
+    let live: Data
+    let details: Data
+    var arguments: [[String]] = []
+    init(live: Data, details: Data) { self.live = live; self.details = details }
+    func query(_ arguments: [String]) -> Data {
+        self.arguments.append(arguments)
+        return arguments[2] == "lockState" ? live : details
+    }
+}
+
 private func discoveryList(_ devices: [[String: Any]]) throws -> Data {
     try JSONSerialization.data(withJSONObject: ["info": ["jsonVersion": 5], "result": ["devices": devices]])
 }

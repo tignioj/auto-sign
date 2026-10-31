@@ -19,7 +19,7 @@ struct AppleDevice: Identifiable, Hashable, Sendable {
     let osVersion: String
     let isPaired: Bool
     let developerModeEnabled: Bool
-    let isConnected: Bool
+    var isConnected: Bool
 
     var statusText: String {
         if !isPaired { return L10n.tr("需与这台 Mac 配对") }

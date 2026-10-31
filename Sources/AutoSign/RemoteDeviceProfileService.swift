@@ -40,7 +40,7 @@ enum RemoteDeviceProfileService {
         let url = FileManager.default.temporaryDirectory.appendingPathComponent("autosign-remote-\(UUID().uuidString).json")
         defer { try? FileManager.default.removeItem(at: url) }
         let result = try await ProcessRunner.run("/usr/bin/xcrun", ["devicectl", "device", "info", "details", "--device", device.udid,
-            "--timeout", "15", "--json-output", url.path, "--quiet"])
+            "--timeout", "30", "--json-output", url.path, "--quiet"])
         try Task.checkCancellation()
         guard result.status == 0 else {
             throw ProfileRefreshError.unavailable(L10n.tr("无法准备 CoreDevice 描述文件连接：\(result.output)"))
@@ -59,11 +59,24 @@ enum RemoteDeviceProfileService {
 
     static func tunnelAddress(from data: Data, expectedUDID: String) throws -> String {
         guard let device = try DeviceService.parseDeviceDetails(from: data), device.udid == expectedUDID,
-              device.isReadyForInstallation,
               let root = try JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let result = root["result"] as? [String: Any], let connection = result["connectionProperties"] as? [String: Any],
-              connection["pairingState"] as? String == "paired",
-              let address = connection["tunnelIPAddress"] as? String, ipv6(address) != nil else {
+              let result = root["result"] as? [String: Any] else {
+            throw ProfileRefreshError.unavailable(L10n.tr("CoreDevice 目标设备、配对状态或隧道地址无效，已停止操作。"))
+        }
+        let properties = result["properties"] as? [String: Any]
+        let connection = properties?["connection"] as? [String: Any]
+        let legacyConnection = result["connectionProperties"] as? [String: Any]
+        guard (connection?["pairingState"] as? String ?? legacyConnection?["pairingState"] as? String) == "paired" else {
+            throw ProfileRefreshError.unavailable(L10n.tr("CoreDevice 目标设备、配对状态或隧道地址无效，已停止操作。"))
+        }
+        // `info details` can succeed with a cached, disconnected snapshot. Only
+        // after validating the original UDID and pairing may we reconnect it.
+        guard device.isConnected else {
+            throw ProfileRefreshError.unavailable(L10n.tr("CoreDevice 描述文件连接尚未就绪。"))
+        }
+        guard device.developerModeEnabled,
+              let address = connection?["tunnelIPAddressString"] as? String ?? legacyConnection?["tunnelIPAddress"] as? String,
+              ipv6(address) != nil else {
             throw ProfileRefreshError.unavailable(L10n.tr("CoreDevice 目标设备、配对状态或隧道地址无效，已停止操作。"))
         }
         return address

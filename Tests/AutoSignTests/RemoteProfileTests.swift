@@ -79,6 +79,38 @@ private func wireHex(_ text: String) -> Data {
     }
 }
 
+@Test func pairedCachedTunnelSnapshotRecoversWithoutChangingTheTarget() async throws {
+    let offline = Data(#"{"result":{"identifier":"core-id","deviceProperties":{"name":"iPad mini 7"},"hardwareProperties":{"deviceType":"iPad","platform":"iOS","udid":"00008130-0000000000000001"},"connectionProperties":{"pairingState":"paired","tunnelState":"unavailable"}}}"#.utf8)
+    let connected = Data(#"{"result":{"identifier":"core-id","properties":{"hardware":{"deviceType":"iPad","platform":"iOS","reality":"physical","udid":"00008130-0000000000000001"},"state":{"name":"iPad mini 7","developerModeStatus":{"enabled":{"mode":1}}},"connection":{"pairingState":"paired","state":"connected","tunnelIPAddressString":"fd64::1"}}}}"#.utf8)
+    var reads = 0
+    var reconnects = 0
+    let address = try await DeviceConnectionRetry.run(operation: {
+        reads += 1
+        return try RemoteDeviceProfileService.tunnelAddress(from: reads == 1 ? offline : connected,
+            expectedUDID: "00008130-0000000000000001")
+    }, beforeRetry: { reconnects += 1 })
+    #expect(address == "fd64::1")
+    #expect(reads == 2 && reconnects == 1)
+}
+
+@Test func transientTunnelRecoveryNeverRetriesIdentityPairingOrInvalidAddresses() async {
+    let samples = [
+        #"{"result":{"identifier":"core-id","deviceProperties":{"name":"Other"},"hardwareProperties":{"deviceType":"iPad","platform":"iOS","reality":"physical","udid":"other"},"connectionProperties":{"pairingState":"paired","tunnelState":"disconnected"}}}"#,
+        #"{"result":{"identifier":"core-id","deviceProperties":{"name":"Unpaired"},"hardwareProperties":{"deviceType":"iPad","platform":"iOS","reality":"physical","udid":"phone"},"connectionProperties":{"pairingState":"unpaired","tunnelState":"disconnected"}}}"#,
+        #"{"result":{"identifier":"core-id","deviceProperties":{"name":"Invalid address","developerModeStatus":"enabled"},"hardwareProperties":{"deviceType":"iPad","platform":"iOS","reality":"physical","udid":"phone"},"connectionProperties":{"pairingState":"paired","tunnelState":"connected","tunnelIPAddress":"localhost"}}}"#
+    ]
+    for sample in samples {
+        var reads = 0
+        do {
+            _ = try await DeviceConnectionRetry.run(operation: {
+                reads += 1
+                return try RemoteDeviceProfileService.tunnelAddress(from: Data(sample.utf8), expectedUDID: "phone")
+            }, beforeRetry: { Issue.record("Must not retry an invalid identity, pairing, or address") })
+            Issue.record("Expected invalid tunnel rejection")
+        } catch { #expect(reads == 1) }
+    }
+}
+
 @Test func strictProfileOnlyRefreshNeverCallsReplacement() async throws {
     for reason in [nil, "certificate changed"] as [String?] {
         for error in [ProfileRefreshError.unsupported("missing service"), .incompatible("changed profile")] {

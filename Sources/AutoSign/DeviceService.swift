@@ -4,16 +4,25 @@ import Foundation
 enum DeviceService {
     static func connectedDevices(excluding removedUDIDs: Set<String> = DeviceRemovalStore.removedUDIDs()) async throws -> [AppleDevice] {
         let devices = try await listedDevices().filter { !removedUDIDs.contains($0.udid) }
+        return await verifiedDevices(devices)
+    }
 
-        // `devicectl list devices` is a passive snapshot. A paired Wi-Fi device can be
-        // reachable even while its on-demand developer tunnel is idle, in which case
-        // the snapshot reports `tunnelState: disconnected`. Probe those devices so
-        // "connected" means that CoreDevice could actually reach them during refresh.
+    static func verifiedDevices(_ devices: [AppleDevice],
+                                probe: @escaping @Sendable (AppleDevice) async -> AppleDevice? = {
+                                    await probeConnection(to: $0)
+                                }) async -> [AppleDevice] {
+        // Both list and details may return stale CoreDevice state. Verify all
+        // paired devices, including ones cached as connected, with a live RPC.
         return await withTaskGroup(of: AppleDevice.self, returning: [AppleDevice].self) { group in
             for device in devices {
                 group.addTask {
-                    guard device.isPaired, !device.isConnected else { return device }
-                    return await probeConnection(to: device) ?? device
+                    guard device.isPaired else { return device }
+                    if let verified = await probe(device), verified.udid == device.udid {
+                        return verified
+                    }
+                    var offline = device
+                    offline.isConnected = false
+                    return offline
                 }
             }
 
@@ -38,28 +47,32 @@ enum DeviceService {
         return try parseDevices(from: Data(contentsOf: jsonURL))
     }
 
-    static func probeConnection(to device: AppleDevice) async -> AppleDevice? {
+    static func probeConnection(to device: AppleDevice,
+                                query: @Sendable ([String]) async throws -> Data = {
+                                    try await deviceQuery($0)
+                                }) async -> AppleDevice? {
+        // Unlike details, lockState requires a response from the actual device.
+        // It works while passcode-locked and neither unlocks nor launches apps.
+        guard let liveData = try? await query([
+            "device", "info", "lockState", "--device", device.udid, "--timeout", "30"
+        ]), let live = try? JSONDecoder().decode(DeviceLockStateResponse.self, from: liveData),
+              let details = try? await query([
+                "device", "info", "details", "--device", device.udid, "--timeout", "30"
+              ]), var verified = try? parseDeviceDetails(from: details),
+              verified.udid == device.udid, verified.isPaired,
+              live.result.deviceIdentifier == verified.id else { return nil }
+        verified.isConnected = true
+        return verified
+    }
+
+    private static func deviceQuery(_ arguments: [String]) async throws -> Data {
         let jsonURL = FileManager.default.temporaryDirectory
             .appendingPathComponent("autosign-device-probe-\(UUID().uuidString).json")
         defer { try? FileManager.default.removeItem(at: jsonURL) }
-
-        guard let result = try? await ProcessRunner.run(
-            "/usr/bin/xcrun",
-            [
-                "devicectl", "device", "info", "details",
-                "--device", device.id,
-                "--timeout", "30",
-                "--json-output", jsonURL.path,
-                "--quiet"
-            ]
-        ), result.status == 0,
-              let data = try? Data(contentsOf: jsonURL),
-              let probedDevice = try? parseDeviceDetails(from: data),
-              probedDevice.udid == device.udid,
-              probedDevice.isConnected else {
-            return nil
-        }
-        return probedDevice
+        _ = try await ProcessRunner.checked("/usr/bin/xcrun",
+            ["devicectl"] + arguments + ["--json-output", jsonURL.path, "--quiet"],
+            context: L10n.tr("无法读取设备。请确认已安装 Xcode。"))
+        return try Data(contentsOf: jsonURL)
     }
 
     static func parseDevices(from data: Data) throws -> [AppleDevice] {
@@ -137,6 +150,14 @@ private struct DeviceListResponse: Decodable {
 
 private struct DeviceDetailsResponse: Decodable {
     let result: DeviceItem
+}
+
+private struct DeviceLockStateResponse: Decodable {
+    let result: ResultBody
+    struct ResultBody: Decodable {
+        let deviceIdentifier: String
+        let passcodeRequired: Bool
+    }
 }
 
 private struct DeviceItem: Decodable {
