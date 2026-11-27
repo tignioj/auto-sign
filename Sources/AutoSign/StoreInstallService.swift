@@ -6,10 +6,7 @@ import CryptoKit
 enum StoreInstallService {
     static func install(_ input: StoreInstallRequest, version: SourceAppVersion, preferences: UserDefaults, updating record: StoreRecord? = nil,
                         statusChanged: @escaping @MainActor @Sendable (String) -> Void) async throws -> Date {
-        let available = try await DeviceService.connectedDevices(excluding: DeviceRemovalStore.removedUDIDs(from: preferences))
-        guard let device = available.first(where: { $0.udid == input.deviceUDID && $0.isReadyForInstallation }) else {
-            throw AutoSignError.command(L10n.tr("设备不可用。请解锁设备，检查 Wi-Fi、USB 配对及开发者模式。"))
-        }
+        let device = try await installationDevice(input.deviceUDID, preferences: preferences)
         statusChanged(L10n.tr("正在下载 IPA \(version.displayVersion)…"))
         let directory = try BackgroundRefreshManager.applicationSupportURL().appendingPathComponent("Downloads", isDirectory: true)
         let ipa = try await AppSourceService().download(version, to: directory)
@@ -19,15 +16,41 @@ enum StoreInstallService {
             throw AppSourceError.invalid(L10n.tr("下载的 IPA 应用标识与源记录不一致，已停止安装。"))
         }
         try validateRelease(metadata, version: version)
+        return try await installPackage(ipa, bundleIdentifier: metadata.bundleIdentifier, device: device,
+                                        preferences: preferences, sourceURL: input.sourceURL,
+                                        updating: record, statusChanged: statusChanged)
+    }
+
+    static func installUploadedIPA(at ipa: URL, deviceUDID: String, preferences: UserDefaults,
+                                   statusChanged: @escaping @MainActor @Sendable (String) -> Void) async throws -> Date {
+        try await AppSourceService.validateIPA(at: ipa, expectedSize: nil)
+        let metadata = try await AppSourceService.packageMetadata(at: ipa)
+        let device = try await installationDevice(deviceUDID, preferences: preferences)
+        return try await installPackage(ipa, bundleIdentifier: metadata.bundleIdentifier, device: device,
+                                        preferences: preferences, statusChanged: statusChanged)
+    }
+
+    private static func installationDevice(_ udid: String, preferences: UserDefaults) async throws -> AppleDevice {
+        let available = try await DeviceService.connectedDevices(excluding: DeviceRemovalStore.removedUDIDs(from: preferences))
+        guard let device = available.first(where: { $0.udid == udid && $0.isReadyForInstallation }) else {
+            throw AutoSignError.command(L10n.tr("设备不可用。请解锁设备，检查 Wi-Fi、USB 配对及开发者模式。"))
+        }
+        return device
+    }
+
+    private static func installPackage(_ ipa: URL, bundleIdentifier: String, device: AppleDevice,
+                                       preferences: UserDefaults,
+                                       sourceURL: String? = nil, updating record: StoreRecord? = nil,
+                                       statusChanged: @escaping @MainActor @Sendable (String) -> Void) async throws -> Date {
         let records = try StoreLibrary.records().filter { $0.app.deviceUDID == device.udid }
         let existing: StoreRecord?
         if let record {
-            guard record.app.deviceUDID == input.deviceUDID,
+            guard record.app.deviceUDID == device.udid,
                   records.contains(where: { $0.app.id == record.app.id && $0.app.bundleIdentifier == record.app.bundleIdentifier }) else {
                 throw AutoSignError.command(L10n.tr("原应用记录已变更，请重新同步后再更新。"))
             }
             existing = record
-        } else { existing = await existingRecord(sourceID: input.bundleIdentifier, deviceUDID: input.deviceUDID, records: records) }
+        } else { existing = await existingRecord(sourceID: bundleIdentifier, deviceUDID: device.udid, records: records) }
         let seed: ProvisioningProfile
         if existing == nil && preferences.bool(forKey: IndependentAccountModel.enabledKey) {
             seed = try IndependentProvisioningService.seedProfile()
@@ -44,7 +67,7 @@ enum StoreInstallService {
         if let team = existing?.teamIdentifier, team != seed.teamIdentifier {
             throw AutoSignError.invalidProfile(L10n.tr("签名团队与原应用不一致，已停止覆盖安装。"))
         }
-        let targetID = existing?.app.bundleIdentifier ?? newBundleIdentifier(sourceID: input.bundleIdentifier, seed: seed)
+        let targetID = existing?.app.bundleIdentifier ?? newBundleIdentifier(sourceID: bundleIdentifier, seed: seed)
         let renewedURL = try await SigningService.requestProfile(for: device, bundleIdentifier: targetID, seed: seed, statusChanged: statusChanged)
         let renewed = try await SigningService.readProfile(at: renewedURL)
         guard renewed.teamIdentifier == seed.teamIdentifier else {
@@ -57,8 +80,8 @@ enum StoreInstallService {
         }
         let signed = ipa.deletingLastPathComponent().appendingPathComponent("signed.ipa")
         _ = try await SigningService.signAndInstall(ipa: ipa, profileURL: renewedURL, identity: identity,
-            device: device, outputIPA: signed, expectedBundleIdentifier: input.bundleIdentifier,
-            installedBundleIdentifier: targetID, sourceURL: input.sourceURL
+            device: device, outputIPA: signed, expectedBundleIdentifier: bundleIdentifier,
+            installedBundleIdentifier: targetID, sourceURL: sourceURL
         ) { _, message in statusChanged(message) }
         return renewed.expirationDate
     }

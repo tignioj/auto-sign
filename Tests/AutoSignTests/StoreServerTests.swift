@@ -1,23 +1,30 @@
 import AutoSignLocalization
+import CryptoKit
 import Foundation
 import Network
 import Testing
 @testable import AutoSign
 
-@Test func parsesFragmentedAuthenticatedRequests() throws {
+@Test @MainActor func parsesFragmentedAuthenticatedRequests() throws {
     let body = Data(#"{"appIDs":["app"]}"#.utf8)
     let header = Data("POST /v1/refresh HTTP/1.1\r\nHost: Mac.local\r\nAuthorization: Bearer abc\r\nContent-Type: application/json\r\nContent-Length: \(body.count)\r\n\r\n".utf8)
-    #expect(try StoreHTTPRequest.parse(Data(header.prefix(20))) == nil)
-    #expect(try StoreHTTPRequest.parse(header + body.prefix(2)) == nil)
-    let request = try #require(try StoreHTTPRequest.parse(header + body))
+    let reader = StoreHTTPRequestReader()
+    let authorize: (StoreHTTPRequest) -> Void = { _ in Issue.record("Ordinary requests never create upload files") }
+    #expect(try reader.append(header.prefix(20), authorizeUpload: authorize) == nil)
+    #expect(try reader.append(header.dropFirst(20) + body.prefix(2), authorizeUpload: authorize) == nil)
+    let request = try #require(try reader.append(body.dropFirst(2), authorizeUpload: authorize))
     #expect(request.method == "POST")
     #expect(request.headers["authorization"] == "Bearer abc")
     #expect(request.body == body)
 }
 
-@Test func rejectsAmbiguousOrOversizedHTTPRequestFraming() {
+@Test @MainActor func rejectsAmbiguousOrOversizedHTTPRequestFraming() {
     let invalid = [
         "POST / HTTP/1.1\r\nContent-Length: -1\r\n\r\n",
+        "POST /v1/refresh HTTP/1.1\r\nContent-Length: 65536\r\n\r\n",
+        "POST /v1/install/ipa HTTP/1.1\r\nContent-Length: 4294967297\r\n\r\n",
+        "POST /v1/install/ipa HTTP/1.1\r\nContent-Type: application/octet-stream\r\n\r\n",
+        "POST /v1/install/ipa HTTP/1.1\r\nContent-Length: 5\r\nContent-Type: application/json\r\n\r\n",
         "POST / HTTP/1.1\r\nContent-Length: 1\r\nContent-Length: 2\r\n\r\na",
         "GET / HTTP/1.1\r\nAuthorization: a\r\nAuthorization: b\r\n\r\n",
         "POST / HTTP/1.1\r\nTransfer-Encoding: chunked\r\n\r\n",
@@ -26,9 +33,27 @@ import Testing
         "GET / HTTP/1.1\r\n\r\nGET / HTTP/1.1\r\n\r\n"
     ]
     for value in invalid {
-        #expect(throws: StoreHTTPError.self) { try StoreHTTPRequest.parse(Data(value.utf8)) }
+        #expect(throws: StoreHTTPError.self) { try StoreHTTPRequestReader().append(Data(value.utf8)) { _ in } }
     }
-    #expect(throws: StoreHTTPError.self) { try StoreHTTPRequest.parse(Data(repeating: 65, count: StoreHTTPRequest.maximumBytes + 1)) }
+    #expect(throws: StoreHTTPError.self) { try StoreHTTPRequestReader().append(Data(repeating: 65, count: StoreHTTPRequest.maximumBytes + 1)) { _ in } }
+}
+
+@Test @MainActor func incompleteUploadsAreRemovedAndRequireAuthenticationBeforeCreatingFiles() throws {
+    let header = Data("POST /v1/install/ipa HTTP/1.1\r\nContent-Type: application/octet-stream\r\nContent-Length: 8\r\n\r\n".utf8)
+    let denied = StoreHTTPRequestReader()
+    #expect(throws: StoreHTTPError.self) {
+        try denied.append(header) { _ in throw StoreHTTPError(status: 401, message: "denied") }
+    }
+    #expect(denied.upload == nil)
+    let path: URL
+    do {
+        let reader = StoreHTTPRequestReader()
+        #expect(try reader.append(header + Data([1, 2])) { _ in } == nil)
+        path = try #require(reader.upload?.fileURL)
+        #expect(try Data(contentsOf: path) == Data([1, 2]))
+        #expect(throws: StoreHTTPError.self) { try reader.append(Data(repeating: 3, count: 7)) { _ in } }
+    }
+    #expect(!FileManager.default.fileExists(atPath: path.path))
 }
 
 private func storeRecord(_ id: String, device: String = "phone", isStore: Bool = false) -> StoreRecord {
@@ -86,16 +111,27 @@ private func storeRecord(_ id: String, device: String = "phone", isStore: Bool =
 }
 
 @MainActor
-private final class HTTPHarness {
+final class HTTPHarness {
     var connections: [UUID: StoreHTTPConnection] = [:]
+    var upload: StoreIPAUpload?
     let listener: NWListener
-    init() throws {
+    init(router: StoreServer? = nil) throws {
         listener = try NWListener(using: .tcp, on: .any)
         listener.newConnectionHandler = { [weak self] connection in
             Task { @MainActor [weak self] in
                 guard let self else { return }
+                if let router { router.accept(connection); return }
                 let id = UUID()
-                let client = StoreHTTPConnection(connection: connection, handler: { request in
+                let client = StoreHTTPConnection(connection: connection, authorizeUpload: { request in
+                    guard request.headers["authorization"] == "Bearer test-token" else {
+                        throw StoreHTTPError(status: 401, message: "Unauthorized")
+                    }
+                }, handler: { [weak self] request in
+                    if let upload = request.upload {
+                        #expect(request.body.isEmpty)
+                        self?.upload = upload
+                        return try! .json(["sha256": upload.sha256], status: 202)
+                    }
                     guard request.headers["authorization"] == "Bearer test-token" else { return .error(401, L10n.tr("配对密钥无效。")) }
                     return try! .json(StoreSnapshot(protocolVersion: 1, serverName: "Test Mac", devices: [], apps: [], recentJobs: []))
                 }, onClose: { [weak self] in self?.connections.removeValue(forKey: id) })
@@ -135,6 +171,30 @@ private final class HTTPHarness {
     #expect((response as? HTTPURLResponse)?.statusCode == 200)
     #expect((response as? HTTPURLResponse)?.value(forHTTPHeaderField: "Cache-Control") == "no-store")
     #expect(try StoreJSON.decoder().decode(StoreSnapshot.self, from: data).serverName == "Test Mac")
+}
+
+@Test @MainActor func realTCPTransportStreamsAnUploadFromFileAndPreservesWorkerOwnership() async throws {
+    let server = try HTTPHarness()
+    let port = try await server.start()
+    defer { server.stop() }
+    let input = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: input) }
+    let body = Data(repeating: 0x35, count: 350_031)
+    try body.write(to: input)
+    var request = URLRequest(url: URL(string: "http://127.0.0.1:\(port)/v1/install/ipa")!)
+    request.httpMethod = "POST"
+    request.setValue("Bearer test-token", forHTTPHeaderField: "Authorization")
+    request.setValue("application/octet-stream", forHTTPHeaderField: "Content-Type")
+    let (data, response) = try await URLSession.shared.upload(for: request, fromFile: input)
+    #expect((response as? HTTPURLResponse)?.statusCode == 202)
+    let digest = SHA256.hash(data: body).map { String(format: "%02x", $0) }.joined()
+    #expect(try JSONDecoder().decode([String: String].self, from: data)["sha256"] == digest)
+    server.stop()
+    let parsedFile = try #require(server.upload?.fileURL)
+    #expect(try Data(contentsOf: parsedFile) == body)
+    #expect(server.upload?.byteCount == body.count)
+    server.upload = nil
+    #expect(!FileManager.default.fileExists(atPath: parsedFile.path))
 }
 
 @Test func renewalUsesCertificateActuallyIncludedInNewProfile() {

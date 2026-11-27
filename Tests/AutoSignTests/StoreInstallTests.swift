@@ -252,3 +252,60 @@ private final class InstallHarness {
         originalID: { _ in nil })
     #expect(fresh == nil)
 }
+
+@Test @MainActor func uploadedIPAPersistsAndInstallsOnceForTheSelectedDevice() async throws {
+    let harness = try InstallHarness()
+    defer { harness.close() }
+    let payload = Data(repeating: 0x42, count: 96 * 1024)
+    var installations = 0
+    var installedFile: URL?
+    harness.server = StoreServer(preferences: harness.preferences, jobsDirectory: harness.folder,
+        devicesProvider: { [installDevice] }, uploadedIPAInstaller: { url, device, _, progress in
+            let received = try Data(contentsOf: url)
+            #expect(received == payload)
+            #expect(device == installDevice.udid)
+            installedFile = url
+            installations += 1
+            progress("Signing")
+            return Date(timeIntervalSince1970: 2_000_000)
+        }, recordsProvider: { [] })
+    let transport = try HTTPHarness(router: harness.server)
+    let port = try await transport.start()
+    defer { transport.stop() }
+    let endpoint = try #require(URL(string: "http://127.0.0.1:\(port)/v1/install/ipa"))
+    let id = UUID().uuidString
+    func upload(_ bytes: Data, requestID: String = id, device: String = "phone", authorized: Bool = true) async throws -> StoreHTTPResponse {
+        var request = URLRequest(url: endpoint)
+        request.httpMethod = "POST"
+        request.setValue("application/octet-stream", forHTTPHeaderField: "Content-Type")
+        request.setValue("Demo%20App.ipa", forHTTPHeaderField: "X-IPA-Filename")
+        request.setValue(requestID, forHTTPHeaderField: "X-Request-ID")
+        request.setValue(device, forHTTPHeaderField: "X-Device-UDID")
+        if authorized { request.setValue("Bearer \(harness.server.token)", forHTTPHeaderField: "Authorization") }
+        let (data, response) = try await URLSession.shared.upload(for: request, from: bytes)
+        return StoreHTTPResponse(status: try #require(response as? HTTPURLResponse).statusCode, body: data)
+    }
+    #expect(try await upload(payload, authorized: false).status == 401)
+    let status = try StoreJSON.decoder().decode(StoreSnapshot.self, from: await harness.call("/v1/status").body)
+    #expect(status.capabilities?.contains("install-ipa") == true)
+    #expect(try await upload(payload, device: "unknown-device").status == 400)
+    let accepted = try await upload(payload)
+    #expect(accepted.status == 202)
+    let job = try StoreJSON.decoder().decode(RefreshJob.self, from: accepted.body)
+    #expect(job.state == .queued && job.uploadedIPA?.sha256.count == 64)
+    #expect(job.items.first?.name == "Demo App.ipa")
+    let persisted = try StoreJSON.decoder().decode([RefreshJob].self, from: Data(contentsOf: harness.folder.appendingPathComponent("jobs.json")))
+    #expect(persisted.first?.id == job.id)
+    #expect(try await upload(Data([0x43])).status == 409)
+    #expect(try await upload(payload, requestID: UUID().uuidString).status == 409)
+    #expect(try await upload(payload, device: "other-device").status == 409)
+    let retry = try await upload(payload)
+    #expect(try StoreJSON.decoder().decode(RefreshJob.self, from: retry.body).id == job.id)
+    let refresh = RefreshRequest(requestID: id, deviceUDID: "phone", appIDs: [id])
+    #expect(await harness.call("/v1/refresh", method: "POST", body: try StoreJSON.encoder().encode(refresh)).status == 409)
+    let finished = try await harness.waitForJob(job.id)
+    #expect(finished.state == .completed)
+    #expect(finished.items.first?.expiration == Date(timeIntervalSince1970: 2_000_000))
+    #expect(installations == 1)
+    #expect(try !FileManager.default.fileExists(atPath: #require(installedFile).path))
+}

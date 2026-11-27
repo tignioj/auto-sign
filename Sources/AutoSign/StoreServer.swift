@@ -7,14 +7,18 @@ import SystemConfiguration
 
 @MainActor
 final class StoreServer: ObservableObject {
+    typealias ProgressHandler = @MainActor @Sendable (String) -> Void
+    typealias UploadedIPAInstaller = @MainActor (URL, String, UserDefaults, @escaping ProgressHandler) async throws -> Date
     static let shared = StoreServer(sourceLibrary: .shared)
     static let port: UInt16 = 8091
     @Published private(set) var isEnabled = false
     @Published private(set) var status = L10n.tr("局域网服务已关闭")
-    @Published private(set) var isBusy = false
+    @Published private var workerBusy = false
+    var isBusy: Bool { workerBusy || uploadingConnection != nil }
     @Published private(set) var token = ""
     private var listener: NWListener?
     private var connections: [UUID: StoreHTTPConnection] = [:]
+    @Published private var uploadingConnection: UUID?
     private var jobs: [RefreshJob] = []
     private var worker: Task<Void, Never>?
     private var sourceMonitor: Task<Void, Never>?
@@ -23,6 +27,7 @@ final class StoreServer: ObservableObject {
     private let devicesProvider: @Sendable () async throws -> [AppleDevice]
     private let sourceLibrary: SourceLibraryModel
     private let installExecutor: (@MainActor @Sendable (StoreInstallRequest, SourceAppVersion, @escaping @MainActor @Sendable (String) -> Void) async throws -> Date)?
+    private let uploadedIPAInstaller: UploadedIPAInstaller
     private let preferences: UserDefaults
     private let jobsDirectory: URL?
     private let recordsProvider: @MainActor () throws -> [StoreRecord]
@@ -30,9 +35,11 @@ final class StoreServer: ObservableObject {
     init(preferences: UserDefaults = .standard, jobsDirectory: URL? = nil, sourceLibrary: SourceLibraryModel? = nil,
          devicesProvider: @escaping @Sendable () async throws -> [AppleDevice] = { try await DeviceService.connectedDevices() },
          installExecutor: (@MainActor @Sendable (StoreInstallRequest, SourceAppVersion, @escaping @MainActor @Sendable (String) -> Void) async throws -> Date)? = nil,
+         uploadedIPAInstaller: @escaping UploadedIPAInstaller = StoreInstallService.installUploadedIPA,
          recordsProvider: @escaping @MainActor () throws -> [StoreRecord] = { try StoreLibrary.records() }) {
         self.sourceLibrary = sourceLibrary ?? SourceLibraryModel(preferences: preferences)
         self.installExecutor = installExecutor
+        self.uploadedIPAInstaller = uploadedIPAInstaller
         self.devicesProvider = devicesProvider
         self.preferences = preferences
         self.jobsDirectory = jobsDirectory
@@ -141,24 +148,70 @@ final class StoreServer: ObservableObject {
         return StoreSnapshot(protocolVersion: 1, serverName: Host.current().localizedName ?? "AutoSign Mac",
             devices: devices.filter { $0.isPaired && !removedUDIDs.contains($0.udid) }.map {
                 StoreDevice(id: $0.udid, name: $0.name, model: $0.marketingName, isConnected: $0.isConnected, isReady: $0.isReadyForInstallation)
-            }, apps: records.map(\.app), recentJobs: jobs, capabilities: ["sources", "install", "updates", "profile-refresh"],
+            }, apps: records.map(\.app), recentJobs: jobs, capabilities: ["sources", "install", "updates", "profile-refresh", "install-ipa"],
             availableUpdates: updates, sourceCheck: sourceLibrary.checkStatus)
     }
 
-    private func accept(_ connection: NWConnection) {
+    func accept(_ connection: NWConnection) {
         guard connections.count < 16 else { connection.cancel(); return }
         let id = UUID()
-        let client = StoreHTTPConnection(connection: connection, handler: { [weak self] request in
+        let client = StoreHTTPConnection(connection: connection, authorizeUpload: { [weak self] request in
+            guard let self else { throw StoreHTTPError(status: 503, message: L10n.tr("服务已停止。")) }
+            try self.authenticate(request)
+            let target = try self.uploadTarget(request)
+            guard self.uploadingConnection == nil else {
+                throw StoreHTTPError(status: 409, message: L10n.tr("Mac 正在接收另一个 IPA，请稍后重试。"))
+            }
+            // A retry may match an already running job. Verify its digest once the body arrives.
+            if !self.jobs.contains(where: { $0.requestID == target.requestID }) {
+                try self.requireIdleInstallWorker()
+            }
+            self.uploadingConnection = id
+        }, handler: { [weak self] request in
             guard let self else { return .error(503, L10n.tr("服务已停止。")) }
             return await self.handle(request)
-        }, onClose: { [weak self] in self?.connections.removeValue(forKey: id) })
+        }, onClose: { [weak self] in
+            if self?.uploadingConnection == id { self?.uploadingConnection = nil }
+            self?.connections.removeValue(forKey: id)
+        })
         connections[id] = client
         client.start()
     }
 
+    private func authenticate(_ request: StoreHTTPRequest) throws {
+        guard !token.isEmpty, request.headers["authorization"] == "Bearer \(token)" else {
+            throw StoreHTTPError(status: 401, message: L10n.tr("配对密钥无效。"))
+        }
+    }
+
+    private func uploadTarget(_ request: StoreHTTPRequest) throws -> (requestID: String, deviceUDID: String) {
+        guard let id = request.headers["x-request-id"], UUID(uuidString: id) != nil,
+              let device = request.headers["x-device-udid"], !device.isEmpty else {
+            throw StoreHTTPError(status: 400, message: L10n.tr("安装参数或请求编号无效。"))
+        }
+        try requireActiveDevice(device)
+        return (id, device)
+    }
+
+    private func requireIdleInstallWorker() throws {
+        guard !workerBusy, !sourceLibrary.isBusy else {
+            throw StoreHTTPError(status: 409, message: L10n.tr("Mac 正在处理应用任务，请稍后重试。"))
+        }
+    }
+
     func handle(_ request: StoreHTTPRequest) async -> StoreHTTPResponse {
-        guard request.headers["authorization"] == "Bearer \(token)", !token.isEmpty else { return .error(401, L10n.tr("配对密钥无效。")) }
         do {
+            try authenticate(request)
+            if request.isIPAUpload {
+                let target = try uploadTarget(request)
+                guard let upload = request.upload else {
+                    throw StoreHTTPError(status: 400, message: L10n.tr("请求内容不完整。"))
+                }
+                let filename = request.headers["x-ipa-filename"]?.removingPercentEncoding
+                let job = try await submitUploadedIPA(upload, requestID: target.requestID, deviceUDID: target.deviceUDID,
+                                                      filename: filename)
+                return try .json(job, status: 202)
+            }
             if request.method == "GET", request.path == "/v1/status" {
                 return try .json(await snapshot())
             }
@@ -219,12 +272,12 @@ final class StoreServer: ObservableObject {
         jobs.insert(job, at: 0)
         jobs = Array(jobs.prefix(30))
         do { try persistJobs() } catch { jobs = previous; throw error }
-        isBusy = true
+        workerBusy = true
         worker = Task { [self] in
             // Deliver and persist the job ID on the phone before installing the client itself.
             try? await Task.sleep(for: .seconds(2))
             await execute(jobID: job.id, records: plan.records)
-            isBusy = false
+            workerBusy = false
             worker = nil
         }
         return job
@@ -239,41 +292,80 @@ final class StoreServer: ObservableObject {
         let job = try StoreJobPlanner.planInstall(input, sources: sourceLibrary.sources, devices: available, jobs: jobs, isBusy: isBusy)
         // Device discovery yields; a concurrent request may have persisted this request in the meantime.
         if jobs.contains(where: { $0.id == job.id }) { return job }
-        let previous = jobs
-        jobs.insert(job, at: 0)
-        jobs = Array(jobs.prefix(30))
-        do { try persistJobs() } catch { jobs = previous; throw error }
-        isBusy = true
-        worker = Task { [self] in
-            try? await Task.sleep(for: .seconds(2))
-            await executeInstall(jobID: job.id, input: input)
-            isBusy = false
-            worker = nil
-        }
-        return job
-    }
-
-    private func executeInstall(jobID: String, input: StoreInstallRequest) async {
-        do {
-            try requireActiveDevice(input.deviceUDID)
-            try update(jobID, index: 0, state: .running, message: L10n.tr("正在检查源中的最新版本…"))
+        return try enqueueInstall(job, startingMessage: L10n.tr("正在检查源中的最新版本…")) { [self] progress in
             let source = try await sourceLibrary.fetchAndSaveSource(input.sourceURL)
             guard let version = source.catalog.apps.first(where: { $0.id == input.bundleIdentifier })?.latestVersion else {
                 throw AppSourceError.invalid(L10n.tr("源中已没有这个应用的可下载版本，请刷新列表。"))
             }
-            let progress: @MainActor @Sendable (String) -> Void = { [weak self] message in
-                self?.updateProgress(jobID, index: 0, message: message)
-            }
-            let expiration: Date
             try requireActiveDevice(input.deviceUDID)
+            let expiration: Date
             if let installExecutor { expiration = try await installExecutor(input, version, progress) }
             else { expiration = try await StoreInstallService.install(input, version: version, preferences: preferences, statusChanged: progress) }
-            try update(jobID, index: 0, state: .completed, message: L10n.tr("已安装 \(version.displayVersion)，可在“我的应用”续签"), expiration: expiration)
-        } catch {
-            do { try update(jobID, index: 0, state: .failed, message: error.localizedDescription) }
-            catch { abortJob(jobID, message: L10n.tr("任务记录写入失败：\(error.localizedDescription)")) }
+            return (L10n.tr("已安装 \(version.displayVersion)，可在“我的应用”续签"), expiration)
         }
-        lastDeviceCheck = .distantPast
+    }
+
+    private func submitUploadedIPA(_ upload: StoreIPAUpload, requestID: String, deviceUDID: String,
+                                   filename: String?) async throws -> RefreshJob {
+        let contents = StoreUploadedIPA(sha256: upload.sha256)
+        func existingJob() throws -> RefreshJob? {
+            guard let job = jobs.first(where: { $0.requestID == requestID }) else { return nil }
+            guard job.deviceUDID == deviceUDID, job.uploadedIPA == contents else {
+                throw StoreHTTPError(status: 409, message: L10n.tr("请求编号已用于其他任务。"))
+            }
+            return job
+        }
+        if let job = try existingJob() { return job }
+        try requireIdleInstallWorker()
+        let available = try await devicesProvider()
+        try requireActiveDevice(deviceUDID)
+        if let job = try existingJob() { return job }
+        try requireIdleInstallWorker()
+        guard available.contains(where: { $0.udid == deviceUDID && $0.isPaired && $0.isReadyForInstallation }) else {
+            throw StoreHTTPError(status: 400, message: L10n.tr("所选设备未配对或尚未就绪。"))
+        }
+        // The client-supplied name is a display label only. Disk paths are generated by the receiver.
+        let name = filename.flatMap { value -> String? in
+            guard !value.isEmpty, value.utf8.count <= 255, !value.contains("/"),
+                  value.rangeOfCharacter(from: .controlCharacters) == nil else { return nil }
+            return value
+        } ?? L10n.tr("本地 IPA")
+        let item = RefreshItem(id: requestID, name: name, state: .queued, message: L10n.tr("等待安装"))
+        let job = RefreshJob(id: UUID().uuidString, requestID: requestID, deviceUDID: deviceUDID,
+            state: .queued, items: [item], createdAt: Date(), updatedAt: Date(), uploadedIPA: contents)
+        return try enqueueInstall(job, startingMessage: L10n.tr("正在解包并检查 IPA…")) { [self] progress in
+            defer { withExtendedLifetime(upload) {} }
+            let expiration = try await uploadedIPAInstaller(upload.fileURL, deviceUDID, preferences, progress)
+            return (L10n.tr("已安装，可在“我的应用”续签"), expiration)
+        }
+    }
+
+    private func enqueueInstall(_ job: RefreshJob, startingMessage: String,
+                                install: @escaping @MainActor (@escaping ProgressHandler) async throws -> (String, Date)) throws -> RefreshJob {
+        let previous = jobs
+        jobs.insert(job, at: 0)
+        jobs = Array(jobs.prefix(30))
+        do { try persistJobs() } catch { jobs = previous; throw error }
+        workerBusy = true
+        worker = Task { [self] in
+            // Allow the phone to record the response before a Store self-install can close it.
+            try? await Task.sleep(for: .seconds(2))
+            do {
+                try requireActiveDevice(job.deviceUDID)
+                try update(job.id, index: 0, state: .running, message: startingMessage)
+                let (message, expiration) = try await install { [weak self] message in
+                    self?.updateProgress(job.id, index: 0, message: message)
+                }
+                try update(job.id, index: 0, state: .completed, message: message, expiration: expiration)
+            } catch {
+                do { try update(job.id, index: 0, state: .failed, message: error.localizedDescription) }
+                catch { abortJob(job.id, message: L10n.tr("任务记录写入失败：\(error.localizedDescription)")) }
+            }
+            lastDeviceCheck = .distantPast
+            workerBusy = false
+            worker = nil
+        }
+        return job
     }
 
     func submitUpdates(_ input: RefreshRequest) async throws -> RefreshJob {
@@ -281,7 +373,7 @@ final class StoreServer: ObservableObject {
         if let existing = try StoreJobPlanner.existingUpdate(input, jobs: jobs) { return existing }
         guard !isBusy, !sourceLibrary.isBusy else { throw StoreHTTPError(status: 409, message: L10n.tr("Mac 正在处理应用任务，请稍后重试。")) }
         // Reserve the worker before device discovery or legacy IPA inspection can yield.
-        isBusy = true
+        workerBusy = true
         do {
             let available = try await devicesProvider()
             try requireActiveDevice(input.deviceUDID)
@@ -298,11 +390,11 @@ final class StoreServer: ObservableObject {
             worker = Task { [self] in
                 try? await Task.sleep(for: .seconds(2))
                 await executeUpdates(jobID: plan.job.id, records: plan.records, updates: updates)
-                isBusy = false
+                workerBusy = false
                 worker = nil
             }
             return plan.job
-        } catch { isBusy = false; throw error }
+        } catch { workerBusy = false; throw error }
     }
 
     private func executeUpdates(jobID: String, records: [StoreRecord], updates: [StoreAppUpdate]) async {

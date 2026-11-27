@@ -14,7 +14,8 @@ enum StoreJobPlanner {
             throw StoreHTTPError(status: 400, message: L10n.tr("请选择 1–50 个应用并提供唯一请求编号。"))
         }
         if let existing = jobs.first(where: { $0.requestID == input.requestID }) {
-            guard existing.installRequest == nil, existing.updateRequest == nil, existing.deviceUDID == input.deviceUDID, Set(existing.items.map(\.id)) == Set(input.appIDs) else {
+            guard existing.installRequest == nil, existing.updateRequest == nil, existing.uploadedIPA == nil,
+                  existing.deviceUDID == input.deviceUDID, Set(existing.items.map(\.id)) == Set(input.appIDs) else {
                 throw StoreHTTPError(status: 409, message: L10n.tr("请求编号已用于其他任务。"))
             }
             return StoreRefreshPlan(job: existing, records: [], isExisting: true)

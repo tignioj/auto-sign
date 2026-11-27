@@ -585,3 +585,9 @@
 "移除设备会停止其自动续签，并从 Mac 和手机 Store 的设备列表隐藏；应用资料和系统配对保留，可随时恢复。" = "Removing a device stops automatic refresh and hides it from device lists on the Mac and in Store. Saved app data and system pairing are kept, and you can restore it at any time.";
 "已移除设备 {0}，可在设备管理中恢复" = "Removed device {0}. You can restore it in Devices.";
 "此设备已移除，请先在 Mac 的设备管理中恢复。" = "This device has been removed. Restore it in Devices on the Mac first.";
+"Mac 正在接收另一个 IPA，请稍后重试。" = "The Mac is receiving another IPA. Try again when the upload finishes.";
+"本地 IPA" = "Local IPA";
+"等待安装" = "Waiting to install";
+"已安装，可在“我的应用”续签" = "Installed. You can refresh its signature in My Apps.";
+"请使用二进制 IPA 请求。" = "Send the IPA as application/octet-stream.";
+"无法保存上传的 IPA。" = "The Mac could not save the uploaded IPA.";

@@ -1,4 +1,5 @@
 import AutoSignLocalization
+import CryptoKit
 import Foundation
 import Network
 
@@ -7,12 +8,18 @@ struct StoreHTTPRequest: Sendable {
     let path: String
     let headers: [String: String]
     let body: Data
+    var upload: StoreIPAUpload?
 
     static let maximumBytes = 65_536
+    static let maximumUploadBytes = 4 * 1024 * 1024 * 1024
+    var isIPAUpload: Bool { method == "POST" && path == "/v1/install/ipa" }
 
-    static func parse(_ data: Data) throws -> StoreHTTPRequest? {
-        guard data.count <= maximumBytes else { throw StoreHTTPError(status: 413, message: L10n.tr("请求过大。")) }
-        guard let boundary = data.range(of: Data("\r\n\r\n".utf8)) else { return nil }
+    fileprivate static func parseHead(_ data: Data) throws -> (request: Self, offset: Int, length: Int)? {
+        guard let boundary = data.range(of: Data("\r\n\r\n".utf8)) else {
+            guard data.count < maximumBytes else { throw StoreHTTPError(status: 413, message: L10n.tr("请求过大。")) }
+            return nil
+        }
+        guard boundary.upperBound <= maximumBytes else { throw StoreHTTPError(status: 413, message: L10n.tr("请求过大。")) }
         guard let text = String(data: data[..<boundary.lowerBound], encoding: .utf8) else {
             throw StoreHTTPError(status: 400, message: L10n.tr("无效请求头。"))
         }
@@ -31,15 +38,97 @@ struct StoreHTTPRequest: Sendable {
             headers[key] = String(line[line.index(after: colon)...]).trimmingCharacters(in: .whitespaces)
         }
         guard headers["transfer-encoding"] == nil else { throw StoreHTTPError(status: 400, message: L10n.tr("不支持分块请求。")) }
+        let request = Self(method: String(first[0]), path: String(first[1]), headers: headers, body: Data())
         let rawLength = headers["content-length"] ?? "0"
+        let limit = request.isIPAUpload ? maximumUploadBytes : maximumBytes - boundary.upperBound
         guard !rawLength.isEmpty, rawLength.allSatisfy({ $0.isASCII && $0.isNumber }),
-              let length = Int(rawLength), length <= maximumBytes - boundary.upperBound else {
+              let length = Int(rawLength), length <= limit else {
             throw StoreHTTPError(status: 413, message: L10n.tr("无效请求长度。"))
         }
-        guard data.count >= boundary.upperBound + length else { return nil }
-        guard data.count == boundary.upperBound + length else { throw StoreHTTPError(status: 400, message: L10n.tr("不支持流水线请求。")) }
-        return StoreHTTPRequest(method: String(first[0]), path: String(first[1]), headers: headers,
-                                body: Data(data[boundary.upperBound...]))
+        return (request, boundary.upperBound, length)
+    }
+}
+
+/// The connection and then the installation worker retain this file for as long as they need it.
+@MainActor
+final class StoreIPAUpload {
+    let fileURL: URL
+    private let handle: FileHandle
+    private var digest = SHA256()
+    private(set) var byteCount = 0
+    private(set) var sha256 = ""
+
+    fileprivate init() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("AutoSign-upload-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: false, attributes: [.posixPermissions: 0o700])
+        fileURL = directory.appendingPathComponent("input.ipa")
+        do {
+            try Data().write(to: fileURL, options: .withoutOverwriting)
+            handle = try FileHandle(forWritingTo: fileURL)
+        } catch {
+            try? FileManager.default.removeItem(at: directory)
+            throw error
+        }
+    }
+
+    fileprivate func append(_ data: Data) throws {
+        try handle.write(contentsOf: data)
+        digest.update(data: data)
+        byteCount += data.count
+    }
+
+    fileprivate func finish() throws {
+        try handle.close()
+        sha256 = digest.finalize().map { String(format: "%02x", $0) }.joined()
+    }
+
+    deinit { try? FileManager.default.removeItem(at: fileURL.deletingLastPathComponent()) }
+}
+
+@MainActor
+final class StoreHTTPRequestReader {
+    private var buffer = Data()
+    private var head: StoreHTTPRequest?
+    private var length = 0
+    private(set) var upload: StoreIPAUpload?
+    var expectsContinue: Bool { head?.headers["expect"]?.lowercased() == "100-continue" }
+
+    func append(_ data: Data, authorizeUpload: (StoreHTTPRequest) throws -> Void) throws -> StoreHTTPRequest? {
+        if let head { return try appendBody(data, to: head) }
+        buffer.append(data)
+        guard let parsed = try StoreHTTPRequest.parseHead(buffer) else { return nil }
+        let request = parsed.request
+        if request.isIPAUpload {
+            try authorizeUpload(request)
+            guard request.headers["content-type"]?.lowercased() == "application/octet-stream" else {
+                throw StoreHTTPError(status: 415, message: L10n.tr("请使用二进制 IPA 请求。"))
+            }
+            guard parsed.length > 0 else { throw StoreHTTPError(status: 400, message: L10n.tr("无效请求长度。")) }
+            upload = try StoreIPAUpload()
+        }
+        head = request
+        length = parsed.length
+        let body = buffer.suffix(from: parsed.offset)
+        buffer = Data()
+        return try appendBody(body, to: request)
+    }
+
+    private func appendBody(_ data: Data, to request: StoreHTTPRequest) throws -> StoreHTTPRequest? {
+        let received = upload?.byteCount ?? buffer.count
+        guard data.count <= length - received else {
+            throw StoreHTTPError(status: 400, message: L10n.tr("不支持流水线请求。"))
+        }
+        if let upload {
+            try upload.append(data)
+            guard upload.byteCount == length else { return nil }
+            try upload.finish()
+            var completed = request
+            completed.upload = upload
+            return completed
+        }
+        buffer.append(data)
+        guard buffer.count == length else { return nil }
+        return StoreHTTPRequest(method: request.method, path: request.path, headers: request.headers, body: buffer)
     }
 }
 
@@ -63,15 +152,22 @@ struct StoreHTTPResponse: Sendable {
 @MainActor
 final class StoreHTTPConnection {
     private let connection: NWConnection
-    private var buffer = Data()
+    private var reader = StoreHTTPRequestReader()
+    private var lastProgress = ContinuousClock.now
+    private let authorizeUpload: @MainActor (StoreHTTPRequest) throws -> Void
     private var timeout: Task<Void, Never>?
     private var finished = false
     private let handler: @MainActor (StoreHTTPRequest) async -> StoreHTTPResponse
     private let onClose: @MainActor () -> Void
 
-    init(connection: NWConnection, handler: @escaping @MainActor (StoreHTTPRequest) async -> StoreHTTPResponse,
+    init(connection: NWConnection,
+         authorizeUpload: @escaping @MainActor (StoreHTTPRequest) throws -> Void = { _ in
+             throw StoreHTTPError(status: 401, message: L10n.tr("配对密钥无效。"))
+         },
+         handler: @escaping @MainActor (StoreHTTPRequest) async -> StoreHTTPResponse,
          onClose: @escaping @MainActor () -> Void) {
         self.connection = connection
+        self.authorizeUpload = authorizeUpload
         self.handler = handler
         self.onClose = onClose
     }
@@ -79,8 +175,11 @@ final class StoreHTTPConnection {
     func start() {
         connection.start(queue: .main)
         timeout = Task { [weak self] in
-            do { try await Task.sleep(for: .seconds(75)) } catch { return }
-            self?.close()
+            while let progress = self?.lastProgress {
+                do { try await Task.sleep(until: progress.advanced(by: .seconds(75)), clock: .continuous) }
+                catch { return }
+                if self?.lastProgress == progress { self?.close(); return }
+            }
         }
         receive()
     }
@@ -89,23 +188,34 @@ final class StoreHTTPConnection {
         guard !finished else { return }
         finished = true
         timeout?.cancel()
+        reader = StoreHTTPRequestReader()
         connection.cancel()
         onClose()
     }
 
     private func receive() {
-        connection.receive(minimumIncompleteLength: 1, maximumLength: 8192) { [weak self] data, _, complete, error in
+        connection.receive(minimumIncompleteLength: 1, maximumLength: 128 * 1024) { [weak self] data, _, complete, error in
             Task { @MainActor [weak self] in
                 guard let self, !self.finished else { return }
-                if let data { self.buffer.append(data) }
                 do {
-                    if let request = try StoreHTTPRequest.parse(self.buffer) {
+                    let wasUploading = self.reader.upload != nil
+                    let chunk = data ?? Data()
+                    if let request = try self.reader.append(chunk, authorizeUpload: self.authorizeUpload) {
+                        self.reader = StoreHTTPRequestReader()
                         let response = await self.handler(request)
                         self.send(response)
                     } else if complete || error != nil { self.close() }
-                    else { self.receive() }
+                    else {
+                        if self.reader.upload != nil, !chunk.isEmpty {
+                            self.lastProgress = .now
+                            if !wasUploading && self.reader.expectsContinue {
+                                self.connection.send(content: Data("HTTP/1.1 100 Continue\r\n\r\n".utf8), completion: .idempotent)
+                            }
+                        }
+                        self.receive()
+                    }
                 } catch let error as StoreHTTPError { self.send(.error(error.status, error.message)) }
-                catch { self.send(.error(400, L10n.tr("无效请求。"))) }
+                catch { self.send(.error(500, L10n.tr("无法保存上传的 IPA。"))) }
             }
         }
     }
